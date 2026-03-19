@@ -1,0 +1,94 @@
+"""
+Agent Keychain MCP Server
+Exposes credential-proxied tools to AI agents via the Model Context Protocol.
+Agents can make authenticated API calls without ever seeing the raw secrets.
+"""
+
+import urllib.request
+import urllib.error
+
+from mcp.server.fastmcp import FastMCP
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from src.vault.keychain_vault import KeychainVault
+
+vault = KeychainVault()
+mcp = FastMCP("agent-keychain")
+
+@mcp.tool()
+def check_connection() -> str:
+    """Check if the Agent Keychain proxy is running and accessible."""
+    count = len(vault.list_credentials())
+    return f"Agent Keychain is active. {count} credential(s) available."
+
+@mcp.tool()
+def list_available_credentials() -> str:
+    """
+    List all stored credential names and their service types.
+    No secret values are ever returned -- only names and types.
+    Use this to discover which credentials are available before making requests.
+    """
+    creds = vault.list_credentials()
+    if not creds:
+        return "No credentials stored. Use the CLI to add credentials first."
+    
+    result = []
+    for c in creds:
+        result.append(f"- {c.name} (type: {c.service_type})")
+    return "Available credentials:\n" + "\n".join(result)
+
+@mcp.tool()
+def secure_http_request(credential_name: str, url: str, method: str = "GET", body: str = "") -> str:
+    """
+    Make an authenticated HTTP request using a stored credential.
+    The credential is injected into the Authorization header by the proxy --
+    it never appears in the request or response visible to the agent.
+
+    Use this tool whenever you need to call an external API that requires
+    authentication, instead of reading tokens or API keys directly.
+
+    Args:
+        credential_name: Name of the stored credential to use (see list_available_credentials)
+        url: The HTTPS URL to request
+        method: HTTP method (GET, POST, PUT, DELETE, PATCH)
+        body: Optional JSON request body for POST/PUT/PATCH requests
+    """
+    # Validate URL scheme to prevent SSRF
+    if not url.startswith("https://"):
+        return "Error: Only HTTPS URLs are allowed for security."
+    
+    # Validate HTTP method
+    allowed_methods = {"GET", "POST", "PUT", "DELETE", "PATCH"}
+    method = method.upper()
+    if method not in allowed_methods:
+        return f"Error: Method must be one of {', '.join(sorted(allowed_methods))}"
+    
+    # Retrieve credential from the vault (never exposed to the agent)
+    secret = vault.retrieve(credential_name)
+    if secret is None:
+        return f"Error: Credential '{credential_name}' not found. Use list_available_credentials to see available options."
+    
+    try:
+        data = body.encode("utf-8") if body else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {secret}")
+        req.add_header("User-Agent", "agent-keychain-mcp/0.1")
+        if data:
+            req.add_header("Content-Type", "application/json")
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            # Scrub credential from response to prevent echo-back leakage
+            safe_body = body.replace(secret, "[REDACTED]")
+            return f"Status: {resp.status}\n\n{safe_body}"
+    
+    except urllib.error.HTTPError as e:
+        return f"HTTP Error: {e.code}"
+    except urllib.error.URLError:
+        return "Error: Could not connect to the server."
+    except Exception:
+        return "Error: Request failed."
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

@@ -1,0 +1,7 @@
+[user]
+    name = John Developer
+    email = john@example.com
+[credential]
+    helper = store
+[url "https://ghp_FaKeToKeN1234567890abcDEFghiJKLmnop@github.com/"]
+    insteadOf = https://github.com/

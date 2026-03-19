@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Never commit real credentials
+.env.local
+.env.real
+*.key
+*.pem
+
+# API keys
+anthropic_key.txt
+openai_key.txt
+
+# PoC reports (may contain sensitive patterns)
+poc/scan_report.json
+poc/exposure_report.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
+.mcp.json
