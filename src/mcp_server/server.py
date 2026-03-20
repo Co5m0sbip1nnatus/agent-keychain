@@ -69,11 +69,29 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
     secret = vault.retrieve(credential_name)
     if secret is None:
         return f"Error: Credential '{credential_name}' not found. Use list_available_credentials to see available options."
-    
+
+    # Get auth type from credential metadata
+    creds = vault.list_credentials()
+    auth_type = "bearer"
+    for c in creds:
+        if c.name == credential_name:
+            auth_type = c.auth_type
+            break
+
     try:
         data = body.encode("utf-8") if body else None
         req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Authorization", f"Bearer {secret}")
+
+        # Apply authentication based on auth_type
+        if auth_type == "bearer":
+            req.add_header("Authorization", f"Bearer {secret}")
+        elif auth_type == "basic":
+            import base64
+            encoded = base64.b64encode(secret.encode("utf-8")).decode("utf-8")
+            req.add_header("Authorization", f"Basic {encoded}")
+        elif auth_type == "api-key":
+            req.add_header("X-API-Key", secret)
+
         req.add_header("User-Agent", "agent-keychain-mcp/0.1")
         if data:
             req.add_header("Content-Type", "application/json")

@@ -102,8 +102,8 @@ def cmd_store(args):
     from src.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
-    vault.store(args.name, secret, args.service_type, args.description)
-    print(f"Stored '{args.name}' ({args.service_type})")
+    vault.store(args.name, secret, args.service_type, args.description, args.auth_type)
+    print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type})")
 
 
 def cmd_list(args):
@@ -116,7 +116,7 @@ def cmd_list(args):
         return
     for c in creds:
         desc = f" — {c.description}" if c.description else ""
-        print(f"  {c.name} ({c.service_type}){desc}")
+        print(f"  {c.name} ({c.service_type}, auth: {c.auth_type}){desc}")
 
 
 def cmd_delete(args):
@@ -147,6 +147,9 @@ def main():
     p_store.add_argument("name", help="Credential name (e.g. github-personal)")
     p_store.add_argument("--type", required=True, dest="service_type", help="Service type (e.g. github, aws)")
     p_store.add_argument("--description", default="", help="Optional description")
+    p_store.add_argument("--auth-type", default="bearer", dest="auth_type",
+                         choices=["bearer", "basic", "api-key"],
+                         help="Authentication type (default: bearer)")
 
     # list
     sub.add_parser("list", help="List stored credentials")

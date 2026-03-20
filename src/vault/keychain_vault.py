@@ -11,6 +11,8 @@ from typing import Optional
 
 import keyring.errors
 
+VALID_AUTH_TYPES = {"bearer", "basic", "api-key"}
+
 @dataclass
 class CredentialEntry:
     """Represents metadata for a stored credential. Secret values are never held here."""
@@ -18,6 +20,7 @@ class CredentialEntry:
     service_type: str
     created_at: float
     description: str = ""
+    auth_type: str = "bearer"  # bearer, basic, api-key
 
 class KeychainVault:
     """
@@ -42,6 +45,7 @@ class KeychainVault:
                 "service_type": entry.service_type,
                 "created_at": entry.created_at,
                 "description": entry.description,
+                "auth_type": entry.auth_type,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -62,15 +66,18 @@ class KeychainVault:
                     service_type=info["service_type"],
                     created_at=info["created_at"],
                     description=info.get("description", ""),
+                    auth_type=info.get("auth_type", "bearer"),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "") -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer") -> None:
         """Store a credential. The secret is encrypted by the OS keychain."""
         if not name or not secret:
             raise ValueError("Credential name and secret must not be empty")
-        
+        if auth_type not in VALID_AUTH_TYPES:
+            raise ValueError(f"auth_type must be one of {', '.join(sorted(VALID_AUTH_TYPES))}")
+
         try:
             keyring.set_password(self.SERVICE_NAME, name, secret)
         except keyring.errors.PasswordSetError as e:
@@ -81,6 +88,7 @@ class KeychainVault:
             service_type=service_type,
             created_at=time.time(),
             description=description,
+            auth_type=auth_type,
         )
         self._save_metadata()
 
