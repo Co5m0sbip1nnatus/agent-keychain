@@ -13,7 +13,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.vault.keychain_vault import KeychainVault
 from src.guard.credential_guard import redact, scan
+from src.logging.logger import get_logger
 
+log = get_logger("mcp")
 vault = KeychainVault()
 mcp = FastMCP("agent-keychain")
 
@@ -103,11 +105,17 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
             return f"Status: {resp.status}\n\n{safe_body}"
     
     except urllib.error.HTTPError as e:
+        log.warning("HTTP %d for %s %s (credential: %s)", e.code, method, url, credential_name)
         return f"HTTP Error: {e.code}"
-    except urllib.error.URLError:
-        return "Error: Could not connect to the server."
-    except Exception:
-        return "Error: Request failed."
+    except urllib.error.URLError as e:
+        log.error("Connection failed for %s: %s", url, e.reason)
+        return f"Error: Could not connect to {url} — {e.reason}"
+    except TimeoutError:
+        log.error("Request timed out for %s %s", method, url)
+        return f"Error: Request to {url} timed out after 15 seconds."
+    except Exception as e:
+        log.error("Unexpected error for %s %s: %s", method, url, type(e).__name__)
+        return f"Error: Request failed — {type(e).__name__}"
 
 @mcp.tool()
 def safe_read_file(file_path: str) -> str:
@@ -135,9 +143,11 @@ def safe_read_file(file_path: str) -> str:
 
     if findings:
         summary = ", ".join(f"{f['count']} {f['type']}" for f in findings)
+        log.info("Redacted credentials in '%s': %s", file_path, summary)
         header = f"[Credential Guard: redacted {summary}]\n\n"
         return header + redacted_content
 
+    log.debug("No credentials found in '%s'", file_path)
     return redacted_content
 
 

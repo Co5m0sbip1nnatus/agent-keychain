@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 import keyring.errors
+from src.logging.logger import get_logger
+
+log = get_logger("vault")
 
 VALID_AUTH_TYPES = {"bearer", "basic", "api-key"}
 
@@ -81,7 +84,10 @@ class KeychainVault:
         try:
             keyring.set_password(self.SERVICE_NAME, name, secret)
         except keyring.errors.PasswordSetError as e:
+            log.error("Failed to store credential '%s' in keychain", name)
             raise RuntimeError(f"Failed to store credential '{name}' in keychain") from e
+
+        log.info("Stored credential '%s' (type: %s, auth: %s)", name, service_type, auth_type)
 
         self._metadata[name] = CredentialEntry(
             name=name,
@@ -108,6 +114,7 @@ class KeychainVault:
             pass
         del self._metadata[name]
         self._save_metadata()
+        log.info("Deleted credential '%s'", name)
         return True
     
     def list_credentials(self) -> list[CredentialEntry]:
