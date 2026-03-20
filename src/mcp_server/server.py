@@ -12,6 +12,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.vault.keychain_vault import KeychainVault
+from src.guard.credential_guard import redact, scan
 
 vault = KeychainVault()
 mcp = FastMCP("agent-keychain")
@@ -89,6 +90,70 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
         return "Error: Could not connect to the server."
     except Exception:
         return "Error: Request failed."
+
+@mcp.tool()
+def safe_read_file(file_path: str) -> str:
+    """
+    Read a file with automatic credential redaction.
+    Any detected credentials (API keys, tokens, passwords, private keys)
+    are replaced with [REDACTED] before the content reaches the agent.
+
+    Use this instead of reading files directly when the file might contain secrets.
+
+    Args:
+        file_path: Absolute or relative path to the file to read
+    """
+    import os
+    if not os.path.isfile(file_path):
+        return f"Error: File '{file_path}' not found."
+
+    try:
+        with open(file_path, "r", errors="replace") as f:
+            content = f.read()
+    except PermissionError:
+        return f"Error: Permission denied for '{file_path}'."
+
+    redacted_content, findings = redact(content)
+
+    if findings:
+        summary = ", ".join(f"{f['count']} {f['type']}" for f in findings)
+        header = f"[Credential Guard: redacted {summary}]\n\n"
+        return header + redacted_content
+
+    return redacted_content
+
+
+@mcp.tool()
+def scan_file_for_secrets(file_path: str) -> str:
+    """
+    Scan a file for credential patterns without returning its contents.
+    Returns a report of what types of credentials were detected.
+
+    Use this to check if a file contains secrets before reading it.
+
+    Args:
+        file_path: Absolute or relative path to the file to scan
+    """
+    import os
+    if not os.path.isfile(file_path):
+        return f"Error: File '{file_path}' not found."
+
+    try:
+        with open(file_path, "r", errors="replace") as f:
+            content = f.read()
+    except PermissionError:
+        return f"Error: Permission denied for '{file_path}'."
+
+    findings = scan(content)
+
+    if not findings:
+        return f"No credentials detected in '{file_path}'."
+
+    result = f"Credentials detected in '{file_path}':\n"
+    for f in findings:
+        result += f"- {f['type']}: {f['count']} occurrence(s)\n"
+    return result
+
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

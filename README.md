@@ -25,33 +25,53 @@ Agent                    Agent Keychain                  External API
 
 - **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS.
 - **MCP Server** (`src/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
+- **Credential Guard** (`src/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
 - **Intent Proxy** (`src/proxy/`) — Local Unix Domain Socket proxy that handles credential-bearing HTTP requests on behalf of agents.
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Install
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pip install agent-keychain
 ```
 
-### 2. Store a credential
+Or from source:
 
 ```bash
-python store_credential.py <name> --type <service_type> [--description "..."]
+git clone https://github.com/Co5m0sbip1nnatus/agent-keychain.git
+cd agent-keychain
+pip install -e .
 ```
 
-Example:
+### 2. Enable credential guard (Claude Code)
 
 ```bash
-python store_credential.py github-personal --type github --description "Personal access token"
+agent-keychain install
 ```
 
-The secret is prompted interactively and stored in your OS keychain (macOS Keychain / Linux SecretService), never written to a file. Run `python store_credential.py -h` for more examples.
+This registers a hook in Claude Code that automatically blocks file reads containing credentials and directs the agent to use `safe_read_file` instead. To remove:
 
-### 3. Use as MCP Server (with Claude Code)
+```bash
+agent-keychain uninstall
+```
+
+### 3. Store a credential
+
+```bash
+agent-keychain store github-personal --type github --description "Personal access token"
+```
+
+The secret is prompted interactively and stored in your OS keychain, never written to a file.
+
+Other credential commands:
+
+```bash
+agent-keychain list              # List all stored credentials
+agent-keychain delete my-token   # Delete a credential
+```
+
+### 4. Use as MCP Server (with Claude Code)
 
 Create a `.mcp.json` in the project root:
 
@@ -76,8 +96,10 @@ Then use the exposed tools:
 - `check_connection` — Verify the keychain is active
 - `list_available_credentials` — See stored credential names (no secrets)
 - `secure_http_request` — Make authenticated API calls through the proxy
+- `safe_read_file` — Read files with automatic credential redaction
+- `scan_file_for_secrets` — Check if a file contains credentials before reading
 
-### 4. Run the PoC demos (Docker)
+### 5. Run the PoC demos (Docker)
 
 ```bash
 # Build the simulated developer environment
@@ -100,14 +122,19 @@ agent-keychain/
 │   │   └── keychain_vault.py
 │   ├── mcp_server/             # MCP server for AI agent integration
 │   │   └── server.py
+│   ├── guard/                  # Credential detection and redaction engine
+│   │   └── credential_guard.py
 │   └── proxy/                  # Unix socket intent proxy
 │       └── intent_proxy.py
-├── poc/                        # Proof of Concept demos
-│   ├── credential_scanner.py   # PoC #1: Credential exposure scanner
+│   └── cli.py                 # Unified CLI entry point
+├── tests/                       # Unit and integration tests
+├── poc/                         # Proof of Concept demos
+│   ├── credential_scanner.py    # PoC #1: Credential exposure scanner
 │   ├── agent_credential_exposure.py  # PoC #2: Live LLM exposure demo
-│   └── fake_credentials/       # Simulated developer credential files
-├── Dockerfile                  # Simulated developer environment for PoCs
-├── store_credential.py          # CLI to store credentials in OS keychain
+│   └── fake_credentials/        # Simulated developer credential files
+├── .claude/hooks/               # Credential guard hook for Claude Code
+├── Dockerfile                   # Simulated developer environment for PoCs
+├── pyproject.toml               # Package configuration
 └── requirements.txt
 ```
 
