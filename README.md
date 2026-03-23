@@ -1,5 +1,8 @@
 # Agent Keychain
 
+[![Tests](https://github.com/Co5m0sbip1nnatus/agent-keychain/actions/workflows/test.yml/badge.svg)](https://github.com/Co5m0sbip1nnatus/agent-keychain/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A credential isolation framework for AI coding agents.
 
 Like Apple Keychain protects your passwords from apps, Agent Keychain protects your credentials from AI coding agents (Claude Code, Cursor, etc.).
@@ -118,23 +121,26 @@ docker run --rm -e ANTHROPIC_API_KEY agent-keychain-poc \
 ```
 agent-keychain/
 ├── src/
-│   ├── vault/                  # OS keychain-backed credential store
+│   ├── vault/                 # OS keychain-backed credential store
 │   │   └── keychain_vault.py
-│   ├── mcp_server/             # MCP server for AI agent integration
+│   ├── mcp_server/            # MCP server for AI agent integration
 │   │   └── server.py
-│   ├── guard/                  # Credential detection and redaction engine
+│   ├── guard/                 # Credential detection and redaction engine
 │   │   └── credential_guard.py
-│   └── proxy/                  # Unix socket intent proxy
-│       └── intent_proxy.py
-│   └── cli.py                 # Unified CLI entry point
-├── tests/                       # Unit and integration tests
-├── poc/                         # Proof of Concept demos
-│   ├── credential_scanner.py    # PoC #1: Credential exposure scanner
+│   ├── proxy/                 # Unix socket intent proxy
+│   │   └── intent_proxy.py
+│   ├── hooks/                 # Credential guard hook for Claude Code
+│   │   └── credential-guard.sh
+│   ├── logging/               # Structured logging (secrets never logged)
+│   │   └── logger.py
+│   └── cli.py                # Unified CLI entry point
+├── tests/                     # Unit and integration tests
+├── poc/                       # Proof of Concept demos
+│   ├── credential_scanner.py  # PoC #1: Credential exposure scanner
 │   ├── agent_credential_exposure.py  # PoC #2: Live LLM exposure demo
-│   └── fake_credentials/        # Simulated developer credential files
-├── .claude/hooks/               # Credential guard hook for Claude Code
-├── Dockerfile                   # Simulated developer environment for PoCs
-├── pyproject.toml               # Package configuration
+│   └── fake_credentials/      # Simulated developer credential files
+├── pyproject.toml             # Package configuration
+├── Dockerfile                 # Simulated developer environment for PoCs
 └── requirements.txt
 ```
 
