@@ -4,15 +4,13 @@ Exposes credential-proxied tools to AI agents via the Model Context Protocol.
 Agents can make authenticated API calls without ever seeing the raw secrets.
 """
 
-import urllib.request
-import urllib.error
-
 from mcp.server.fastmcp import FastMCP
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.vault.keychain_vault import KeychainVault
 from src.guard.credential_guard import redact, scan
+from src.proxy.process_pool import run_isolated_request
 from src.logging.logger import get_logger
 
 log = get_logger("mcp")
@@ -67,9 +65,8 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
     if method not in allowed_methods:
         return f"Error: Method must be one of {', '.join(sorted(allowed_methods))}"
     
-    # Retrieve credential from the vault (never exposed to the agent)
-    secret = vault.retrieve(credential_name)
-    if secret is None:
+    # Check credential exists before spawning subprocess
+    if not vault.has(credential_name):
         return f"Error: Credential '{credential_name}' not found. Use list_available_credentials to see available options."
 
     # Get auth type from credential metadata
@@ -80,42 +77,24 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
             auth_type = c.auth_type
             break
 
-    try:
-        data = body.encode("utf-8") if body else None
-        req = urllib.request.Request(url, data=data, method=method)
+    # Run the HTTP request in an isolated subprocess.
+    # The credential is retrieved, used, and scrubbed entirely within
+    # the subprocess — it never enters the MCP server's memory.
+    import json
+    raw = run_isolated_request(
+        credential_name=credential_name,
+        url=url,
+        method=method,
+        body=body,
+        auth_type=auth_type,
+    )
+    result = json.loads(raw)
 
-        # Apply authentication based on auth_type
-        if auth_type == "bearer":
-            req.add_header("Authorization", f"Bearer {secret}")
-        elif auth_type == "basic":
-            import base64
-            encoded = base64.b64encode(secret.encode("utf-8")).decode("utf-8")
-            req.add_header("Authorization", f"Basic {encoded}")
-        elif auth_type == "api-key":
-            req.add_header("X-API-Key", secret)
-
-        req.add_header("User-Agent", "agent-keychain-mcp/0.1")
-        if data:
-            req.add_header("Content-Type", "application/json")
-
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            # Scrub credential from response to prevent echo-back leakage
-            safe_body = body.replace(secret, "[REDACTED]")
-            return f"Status: {resp.status}\n\n{safe_body}"
-    
-    except urllib.error.HTTPError as e:
-        log.warning("HTTP %d for %s %s (credential: %s)", e.code, method, url, credential_name)
-        return f"HTTP Error: {e.code}"
-    except urllib.error.URLError as e:
-        log.error("Connection failed for %s: %s", url, e.reason)
-        return f"Error: Could not connect to {url} — {e.reason}"
-    except TimeoutError:
-        log.error("Request timed out for %s %s", method, url)
-        return f"Error: Request to {url} timed out after 15 seconds."
-    except Exception as e:
-        log.error("Unexpected error for %s %s: %s", method, url, type(e).__name__)
-        return f"Error: Request failed — {type(e).__name__}"
+    if result.get("success"):
+        return f"Status: {result['status']}\n\n{result['body']}"
+    else:
+        log.warning("Request failed for %s %s: %s", method, url, result.get("error", "unknown"))
+        return f"Error: {result.get('error', 'Request failed')}"
 
 @mcp.tool()
 def safe_read_file(file_path: str) -> str:

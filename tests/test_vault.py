@@ -1,6 +1,7 @@
 """Tests for KeychainVault credential operations."""
 import pytest
 from src.vault.keychain_vault import KeychainVault
+from src.vault.secure_string import SecureString
 
 @pytest.fixture
 def vault():
@@ -12,9 +13,11 @@ def vault():
         v.delete(name)
     
 def test_store_and_retrieve(vault):
-    """Stored credential should be retrievable."""
+    """Stored credential should be retrievable as a SecureString."""
     vault.store("test-cred", "secret123", "test", "Test credential")
-    assert vault.retrieve("test-cred") == "secret123"
+    result = vault.retrieve("test-cred")
+    assert isinstance(result, SecureString)
+    assert result.value == "secret123"
 
 def test_list_credentials(vault):
     """Stored credential should appear in the list."""

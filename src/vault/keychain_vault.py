@@ -11,6 +11,7 @@ from typing import Optional
 
 import keyring.errors
 from src.logging.logger import get_logger
+from src.vault.secure_string import SecureString
 
 log = get_logger("vault")
 
@@ -24,6 +25,7 @@ class CredentialEntry:
     created_at: float
     description: str = ""
     auth_type: str = "bearer"  # bearer, basic, api-key
+    expires_at: Optional[float] = None  # Unix timestamp; None means no expiry
 
 class KeychainVault:
     """
@@ -49,6 +51,7 @@ class KeychainVault:
                 "created_at": entry.created_at,
                 "description": entry.description,
                 "auth_type": entry.auth_type,
+                "expires_at": entry.expires_at,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -70,16 +73,25 @@ class KeychainVault:
                     created_at=info["created_at"],
                     description=info.get("description", ""),
                     auth_type=info.get("auth_type", "bearer"),
+                    expires_at=info.get("expires_at"),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer") -> None:
-        """Store a credential. The secret is encrypted by the OS keychain."""
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None) -> None:
+        """Store a credential. The secret is encrypted by the OS keychain.
+
+        Args:
+            ttl: Optional time-to-live in seconds. If provided, the credential
+                 will automatically expire after this duration.
+        """
         if not name or not secret:
             raise ValueError("Credential name and secret must not be empty")
         if auth_type not in VALID_AUTH_TYPES:
             raise ValueError(f"auth_type must be one of {', '.join(sorted(VALID_AUTH_TYPES))}")
+
+        now = time.time()
+        expires_at = now + ttl if ttl is not None else None
 
         try:
             keyring.set_password(self.SERVICE_NAME, name, secret)
@@ -87,22 +99,45 @@ class KeychainVault:
             log.error("Failed to store credential '%s' in keychain", name)
             raise RuntimeError(f"Failed to store credential '{name}' in keychain") from e
 
-        log.info("Stored credential '%s' (type: %s, auth: %s)", name, service_type, auth_type)
+        if expires_at is not None:
+            log.info("Stored credential '%s' (type: %s, auth: %s, expires in %ds)", name, service_type, auth_type, ttl)
+        else:
+            log.info("Stored credential '%s' (type: %s, auth: %s, no expiry)", name, service_type, auth_type)
 
         self._metadata[name] = CredentialEntry(
             name=name,
             service_type=service_type,
-            created_at=time.time(),
+            created_at=now,
             description=description,
             auth_type=auth_type,
+            expires_at=expires_at,
         )
         self._save_metadata()
 
-    def retrieve(self, name: str) -> Optional[str]:
-        """Retrieve a secret value from the keychain. Returns None if not found."""
+    def retrieve(self, name: str) -> Optional[SecureString]:
+        """Retrieve a secret value from the keychain wrapped in a SecureString.
+
+        Returns None if the credential is not found or has expired.
+        The returned SecureString should be used as a context manager
+        so the secret is automatically scrubbed from memory after use::
+
+            with vault.retrieve("my-cred") as secret:
+                do_something(secret.value)
+            # secret is now zeroed in memory
+        """
         if name not in self._metadata:
             return None
-        return keyring.get_password(self.SERVICE_NAME, name)
+
+        entry = self._metadata[name]
+        if entry.expires_at is not None and time.time() > entry.expires_at:
+            log.warning("Credential '%s' has expired — auto-deleting", name)
+            self.delete(name)
+            return None
+
+        raw = keyring.get_password(self.SERVICE_NAME, name)
+        if raw is None:
+            return None
+        return SecureString(raw)
     
     def delete(self, name: str) -> bool:
         """Remove a credential from the keychain. Returns True if deleted."""

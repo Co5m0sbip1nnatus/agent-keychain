@@ -37,3 +37,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Reference materials
+*.pdf
+blackhat_text.txt

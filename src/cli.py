@@ -102,8 +102,9 @@ def cmd_store(args):
     from src.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
-    vault.store(args.name, secret, args.service_type, args.description, args.auth_type)
-    print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type})")
+    vault.store(args.name, secret, args.service_type, args.description, args.auth_type, ttl=args.ttl)
+    ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
+    print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info})")
 
 
 def cmd_list(args):
@@ -150,6 +151,8 @@ def main():
     p_store.add_argument("--auth-type", default="bearer", dest="auth_type",
                          choices=["bearer", "basic", "api-key"],
                          help="Authentication type (default: bearer)")
+    p_store.add_argument("--ttl", type=int, default=None,
+                         help="Time-to-live in seconds (credential expires after this duration)")
 
     # list
     sub.add_parser("list", help="List stored credentials")

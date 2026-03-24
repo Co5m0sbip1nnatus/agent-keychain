@@ -144,6 +144,33 @@ agent-keychain/
 └── requirements.txt
 ```
 
+## Security Design
+
+Agent Keychain implements defense-in-depth against credential exposure in AI agent environments:
+
+| Layer | Defense | Threat Mitigated |
+|-------|---------|-----------------|
+| **Vault** | OS keychain encryption | Credentials stored in plaintext files |
+| **Credential Guard** | Pattern-based redaction | Secrets leaking into LLM context window |
+| **Hook Enforcement** | Pre-tool-use blocking | Agent bypassing safe read tools |
+| **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |
+| **Process Isolation** | Short-lived subprocess for HTTP | Long-lived process accumulating secrets |
+| **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |
+
+### Threat Model & Limitations
+
+Agent Keychain protects against credential exposure through the **LLM context window** and **process memory** of AI coding agents. It does **not** protect against:
+
+- **Browser session token theft** — Session cookies for web-based AI apps (ChatGPT, Claude) are managed by the browser. Protecting these requires vendor-side changes such as storing tokens in a secure enclave. See [AIKatz — Attacking AI Desktop Apps for Fun & Profit (RSA Conference 2026)](https://www.lumia.security/blog/aikatz) for research on this attack vector.
+- **Kernel-level attacks** — An attacker with root/kernel access can bypass all userspace protections.
+- **Prompt injection via external content** — If an agent processes malicious input that instructs it to exfiltrate data through side channels.
+
+## References
+
+- [AIKatz — Attacking AI Desktop Apps for Fun & Profit](https://www.lumia.security/blog/aikatz) (RSA Conference 2026) — Research on extracting authentication tokens from AI desktop app process memory. Agent Keychain's memory scrubbing and process isolation features are designed to mitigate this class of attacks.
+- [MITRE ATLAS — AML.CS0036](https://atlas.mitre.org/studies/AML.CS0036) — MITRE case study on AI application credential theft.
+- [Model Context Protocol](https://modelcontextprotocol.io/) — The protocol used by Agent Keychain to expose secure tools to AI agents.
+
 ## License
 
 MIT
