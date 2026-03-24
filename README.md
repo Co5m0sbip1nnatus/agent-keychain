@@ -26,10 +26,10 @@ Agent                    Agent Keychain                  External API
 
 ## Components
 
-- **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS.
+- **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use.
 - **MCP Server** (`src/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
 - **Credential Guard** (`src/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
-- **Intent Proxy** (`src/proxy/`) — Local Unix Domain Socket proxy that handles credential-bearing HTTP requests on behalf of agents.
+- **Process Isolation** (`src/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
 
 ## Quick Start
 
@@ -67,6 +67,13 @@ agent-keychain store github-personal --type github --description "Personal acces
 
 The secret is prompted interactively and stored in your OS keychain, never written to a file.
 
+Options:
+
+```bash
+--auth-type bearer|basic|api-key   # Authentication method (default: bearer)
+--ttl 3600                         # Auto-expire after N seconds
+```
+
 Other credential commands:
 
 ```bash
@@ -102,7 +109,18 @@ Then use the exposed tools:
 - `safe_read_file` — Read files with automatic credential redaction
 - `scan_file_for_secrets` — Check if a file contains credentials before reading
 
-### 5. Run the PoC demos (Docker)
+### 5. Run the PoC demos
+
+Before/after comparison demos (run locally):
+
+```bash
+python poc/demo_credential_guard.py     # File read: exposed vs redacted
+python poc/demo_memory_scrubbing.py     # Memory: lingering vs zeroed
+python poc/demo_token_expiry.py         # Token: permanent vs auto-expired
+python poc/demo_process_isolation.py    # Process: shared vs isolated
+```
+
+Attack simulation demos (run in Docker):
 
 ```bash
 # Build the simulated developer environment
@@ -122,13 +140,16 @@ docker run --rm -e ANTHROPIC_API_KEY agent-keychain-poc \
 agent-keychain/
 ├── src/
 │   ├── vault/                 # OS keychain-backed credential store
-│   │   └── keychain_vault.py
+│   │   ├── keychain_vault.py
+│   │   └── secure_string.py  # Memory scrubbing via ctypes
 │   ├── mcp_server/            # MCP server for AI agent integration
 │   │   └── server.py
 │   ├── guard/                 # Credential detection and redaction engine
 │   │   └── credential_guard.py
-│   ├── proxy/                 # Unix socket intent proxy
-│   │   └── intent_proxy.py
+│   ├── proxy/                 # Process-isolated credential handling
+│   │   ├── intent_proxy.py
+│   │   ├── isolated_request.py  # Short-lived subprocess for HTTP
+│   │   └── process_pool.py      # Subprocess spawner
 │   ├── hooks/                 # Credential guard hook for Claude Code
 │   │   └── credential-guard.sh
 │   ├── logging/               # Structured logging (secrets never logged)
@@ -138,7 +159,11 @@ agent-keychain/
 ├── poc/                       # Proof of Concept demos
 │   ├── credential_scanner.py  # PoC #1: Credential exposure scanner
 │   ├── agent_credential_exposure.py  # PoC #2: Live LLM exposure demo
-│   └── fake_credentials/      # Simulated developer credential files
+│   ├── demo_credential_guard.py     # Before/after: file redaction
+│   ├── demo_memory_scrubbing.py     # Before/after: memory zeroing
+│   ├── demo_token_expiry.py         # Before/after: TTL auto-deletion
+│   ├── demo_process_isolation.py    # Before/after: subprocess isolation
+│   └── fake_credentials/            # Simulated developer credential files
 ├── pyproject.toml             # Package configuration
 ├── Dockerfile                 # Simulated developer environment for PoCs
 └── requirements.txt

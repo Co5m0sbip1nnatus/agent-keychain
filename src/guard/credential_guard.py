@@ -20,7 +20,7 @@ CREDENTIAL_PATTERNS = [
     ("Slack User Token", re.compile(r"xoxp-[A-Za-z0-9\-]+")),
     ("SendGrid API Key", re.compile(r"SG\.[A-Za-z0-9\-_.]{22}\.[A-Za-z0-9\-_.]{43}")),
     ("Private Key Block", re.compile(r"-----BEGIN (?:RSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |OPENSSH )?PRIVATE KEY-----")),
-    ("Database URL with Password", re.compile(r"(?:postgres|mysql|mongodb)(?:ql)?://[^:]+:[^@\s]+@[^\s]+")),
+    ("Database URL with Password", re.compile(r"(?:postgres|mysql|mongodb|redis)(?:ql)?://[^@\s]*:[^@\s]+@[^\s]+")),
     ("Bearer Token", re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*")),
     ("JWT", re.compile(r"eyJhbGciOi[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*")),
 ]

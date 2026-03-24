@@ -97,9 +97,9 @@ def main() -> None:
 
     # --- Retrieve credential ---
     vault = KeychainVault()
-    secret = vault.retrieve(credential_name)
+    secure_secret = vault.retrieve(credential_name)
 
-    if secret is None:
+    if secure_secret is None:
         result = {
             "success": False,
             "error": f"Credential '{credential_name}' not found. "
@@ -110,41 +110,39 @@ def main() -> None:
 
     resolved_auth_type = _resolve_auth_type(vault, credential_name, auth_type)
 
-    # --- Make the HTTP request ---
-    try:
-        data = body.encode("utf-8") if body else None
-        req = urllib.request.Request(url, data=data, method=method)
+    # --- Make the HTTP request (credential scrubbed on context exit) ---
+    with secure_secret as ss:
+        secret = ss.value
+        try:
+            data = body.encode("utf-8") if body else None
+            req = urllib.request.Request(url, data=data, method=method)
 
-        header_name, header_value = _build_auth_header(resolved_auth_type, secret)
-        req.add_header(header_name, header_value)
-        req.add_header("User-Agent", "agent-keychain-mcp/0.1")
-        if data:
-            req.add_header("Content-Type", "application/json")
+            header_name, header_value = _build_auth_header(resolved_auth_type, secret)
+            req.add_header(header_name, header_value)
+            req.add_header("User-Agent", "agent-keychain-mcp/0.1")
+            if data:
+                req.add_header("Content-Type", "application/json")
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp_body = resp.read().decode("utf-8", errors="replace")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_body = resp.read().decode("utf-8", errors="replace")
 
-            # Scrub the credential from the response to prevent echo-back leakage
-            safe_body = resp_body.replace(secret, "[REDACTED]")
+                # Scrub the credential from the response to prevent echo-back leakage
+                safe_body = resp_body.replace(secret, "[REDACTED]")
 
-            result = {
-                "success": True,
-                "status": resp.status,
-                "body": safe_body,
-            }
+                result = {
+                    "success": True,
+                    "status": resp.status,
+                    "body": safe_body,
+                }
 
-    except urllib.error.HTTPError as exc:
-        result = {"success": False, "error": f"HTTP Error: {exc.code}", "status": exc.code}
-    except urllib.error.URLError as exc:
-        result = {"success": False, "error": f"Could not connect to {url} — {exc.reason}"}
-    except TimeoutError:
-        result = {"success": False, "error": f"Request to {url} timed out after 15 seconds."}
-    except Exception as exc:
-        result = {"success": False, "error": f"Request failed — {type(exc).__name__}"}
-
-    # --- Write result and exit ---
-    # Explicitly clear the secret from local scope before writing output
-    secret = None  # noqa: F841
+        except urllib.error.HTTPError as exc:
+            result = {"success": False, "error": f"HTTP Error: {exc.code}", "status": exc.code}
+        except urllib.error.URLError as exc:
+            result = {"success": False, "error": f"Could not connect to {url} — {exc.reason}"}
+        except TimeoutError:
+            result = {"success": False, "error": f"Request to {url} timed out after 15 seconds."}
+        except Exception as exc:
+            result = {"success": False, "error": f"Request failed — {type(exc).__name__}"}
 
     sys.stdout.write(json.dumps(result))
     sys.stdout.flush()

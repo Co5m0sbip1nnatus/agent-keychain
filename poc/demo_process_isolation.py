@@ -62,16 +62,17 @@ def with_isolation():
 
     result_json = run_isolated_request(
         credential_name=CRED_NAME,
-        url="https://httpbin.org/headers",
+        url="https://api.github.com/zen",
         method="GET",
     )
     result = json.loads(result_json)
 
+    print(f"  Subprocess completed and exited.")
     if result.get("success"):
-        print(f"  Subprocess completed and exited.")
         print(f"  Response received (credential scrubbed).")
     else:
-        print(f"  Subprocess completed: {result.get('error', 'done')}")
+        print(f"  Request result: {result.get('error', 'done')}")
+        print(f"  (The credential was still handled in the subprocess, not the main process.)")
 
     print(f"\n  ✓ Credential only existed in the subprocess memory.")
     print(f"  ✓ Subprocess exited — all memory released by the OS.")

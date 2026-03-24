@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-keychain"
-version = "1.0.0"
+version = "1.1.0"
 description = "A credential isolation framework for AI coding agents"
 readme = "README.md"
 license = {text = "MIT"}
