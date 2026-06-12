@@ -27,6 +27,7 @@ _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 sys.path.insert(0, _project_root)
 
 from src.vault.keychain_vault import KeychainVault
+from src.vault.domain_policy import host_allowed, extract_host
 
 
 def _build_auth_header(auth_type: str, secret: str) -> tuple[str, str]:
@@ -95,8 +96,21 @@ def main() -> None:
         sys.stdout.write(json.dumps(result))
         sys.exit(1)
 
-    # --- Retrieve credential ---
+    # --- Enforce domain binding before touching the secret ---
     vault = KeychainVault()
+    entry = vault.get(credential_name)
+    if entry is not None:
+        host = extract_host(url)
+        if not host_allowed(host, entry.allowed_domains):
+            result = {
+                "success": False,
+                "error": f"Credential '{credential_name}' is not allowed to call '{host}' "
+                         "(domain binding). Use 'agent-keychain allow-domain' to permit it.",
+            }
+            sys.stdout.write(json.dumps(result))
+            sys.exit(1)
+
+    # --- Retrieve credential ---
     secure_secret = vault.retrieve(credential_name)
 
     if secure_secret is None:

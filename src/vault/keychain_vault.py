@@ -6,7 +6,7 @@ Credential storage backed by the OS-native keychain (macOS Keychain / Linux Secr
 import keyring
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import keyring.errors
@@ -26,6 +26,10 @@ class CredentialEntry:
     description: str = ""
     auth_type: str = "bearer"  # bearer, basic, api-key
     expires_at: Optional[float] = None  # Unix timestamp; None means no expiry
+    # Domains this credential may be used against (suffix match). Empty means
+    # the credential is blocked from all outbound requests (deny-by-default).
+    # The special value ["*"] marks the credential as explicitly unrestricted.
+    allowed_domains: list[str] = field(default_factory=list)
 
 class KeychainVault:
     """
@@ -52,6 +56,7 @@ class KeychainVault:
                 "description": entry.description,
                 "auth_type": entry.auth_type,
                 "expires_at": entry.expires_at,
+                "allowed_domains": entry.allowed_domains,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -74,16 +79,22 @@ class KeychainVault:
                     description=info.get("description", ""),
                     auth_type=info.get("auth_type", "bearer"),
                     expires_at=info.get("expires_at"),
+                    allowed_domains=info.get("allowed_domains", []),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
             ttl: Optional time-to-live in seconds. If provided, the credential
                  will automatically expire after this duration.
+            allowed_domains: Optional list of domains the credential may be used
+                 against (suffix match). Empty/None means the credential is
+                 blocked from outbound requests until domains are set; the
+                 special value ["*"] marks it as explicitly unrestricted.
+                 Enforcement happens at request time, not here.
         """
         if not name or not secret:
             raise ValueError("Credential name and secret must not be empty")
@@ -111,6 +122,7 @@ class KeychainVault:
             description=description,
             auth_type=auth_type,
             expires_at=expires_at,
+            allowed_domains=list(allowed_domains) if allowed_domains else [],
         )
         self._save_metadata()
 
@@ -155,7 +167,25 @@ class KeychainVault:
     def list_credentials(self) -> list[CredentialEntry]:
         """Return metadata for all stored credentials. No secrets are included."""
         return list(self._metadata.values())
-    
+
+    def get(self, name: str) -> Optional[CredentialEntry]:
+        """Return the metadata entry for a credential, or None if not found."""
+        return self._metadata.get(name)
+
+    def set_allowed_domains(self, name: str, allowed_domains: list[str]) -> bool:
+        """Replace the allowed-domain list for an existing credential.
+
+        Returns True if the credential exists and was updated. The secret
+        itself is untouched -- only metadata is rewritten.
+        """
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+        entry.allowed_domains = list(allowed_domains)
+        self._save_metadata()
+        log.info("Updated allowed domains for '%s': %s", name, ", ".join(allowed_domains) or "(none)")
+        return True
+
     def has(self, name: str) -> bool:
         """Check whether a credential exists."""
         return name in self._metadata

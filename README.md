@@ -26,7 +26,7 @@ Agent                    Agent Keychain                  External API
 
 ## Components
 
-- **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use.
+- **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
 - **MCP Server** (`src/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
 - **Credential Guard** (`src/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
 - **Process Isolation** (`src/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
@@ -35,17 +35,15 @@ Agent                    Agent Keychain                  External API
 
 ### 1. Install
 
-```bash
-pip install agent-keychain
-```
-
-Or from source:
+From source:
 
 ```bash
 git clone https://github.com/Co5m0sbip1nnatus/agent-keychain.git
 cd agent-keychain
 pip install -e .
 ```
+
+(A PyPI release is planned but not yet published.)
 
 ### 2. Enable credential guard (Claude Code)
 
@@ -67,18 +65,24 @@ agent-keychain store github-personal --type github --description "Personal acces
 
 The secret is prompted interactively and stored in your OS keychain, never written to a file.
 
+**Domain binding (deny-by-default).** Every credential is bound to the domains it is allowed to be used against. A credential can only ever be sent to those hosts — so a prompt-injected agent cannot exfiltrate a token by pointing a request at an attacker-controlled URL. For known service types (`github`, `aws`, `stripe`, `openai`, `anthropic`, …) the domain is inferred automatically, so the common case needs no extra flags. For an unknown type you'll be asked once for the allowed domain(s).
+
 Options:
 
 ```bash
 --auth-type bearer|basic|api-key   # Authentication method (default: bearer)
 --ttl 3600                         # Auto-expire after N seconds
+--allowed-domain api.github.com    # Bind to a domain (repeatable; suffix match covers subdomains)
+--allow-any                        # Store unrestricted — sendable to any host (use with care)
 ```
 
 Other credential commands:
 
 ```bash
-agent-keychain list              # List all stored credentials
-agent-keychain delete my-token   # Delete a credential
+agent-keychain list                                    # List credentials and their bound domains
+agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
+agent-keychain migrate                                 # Backfill domains for credentials that have none
+agent-keychain delete my-token                         # Delete a credential
 ```
 
 ### 4. Use as MCP Server (with Claude Code)
@@ -147,7 +151,6 @@ agent-keychain/
 │   ├── guard/                 # Credential detection and redaction engine
 │   │   └── credential_guard.py
 │   ├── proxy/                 # Process-isolated credential handling
-│   │   ├── intent_proxy.py
 │   │   ├── isolated_request.py  # Short-lived subprocess for HTTP
 │   │   └── process_pool.py      # Subprocess spawner
 │   ├── hooks/                 # Credential guard hook for Claude Code
@@ -176,8 +179,9 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | Layer | Defense | Threat Mitigated |
 |-------|---------|-----------------|
 | **Vault** | OS keychain encryption | Credentials stored in plaintext files |
+| **Domain Binding** | Per-credential allowed-domain enforcement | Token exfiltration to attacker-controlled endpoints |
 | **Credential Guard** | Pattern-based redaction | Secrets leaking into LLM context window |
-| **Hook Enforcement** | Pre-tool-use blocking | Agent bypassing safe read tools |
+| **Hook Enforcement** | Path-blocklist + content scan on reads | Agent reading credential files directly |
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |
 | **Process Isolation** | Short-lived subprocess for HTTP | Long-lived process accumulating secrets |
 | **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |

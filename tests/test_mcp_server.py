@@ -34,3 +34,32 @@ def test_secure_http_request_missing_credential():
     """Non-existent credential should return an error."""
     result = secure_http_request("nonexistent", "https://api.github.com")
     assert "not found" in result
+
+
+@pytest.fixture
+def github_credential():
+    """A credential bound to github.com, cleaned up after the test."""
+    vault.store("test-domain", "fake-token", "github", allowed_domains=["github.com"])
+    yield
+    vault.delete("test-domain")
+
+
+def test_domain_binding_blocks_other_host(github_credential):
+    """A github-bound credential must not be usable against another host.
+
+    The request is rejected before any subprocess/network call, so this
+    makes no outbound connection.
+    """
+    result = secure_http_request("test-domain", "https://evil.com")
+    assert "not allowed" in result
+    assert "github.com" in result  # error tells the user what IS allowed
+
+
+def test_domain_binding_blocks_when_no_domains():
+    """A credential with no allowed domains is blocked by default."""
+    vault.store("test-nodomain", "fake-token", "test")  # unknown type, no domains
+    try:
+        result = secure_http_request("test-nodomain", "https://api.github.com")
+        assert "no allowed domains" in result
+    finally:
+        vault.delete("test-nodomain")

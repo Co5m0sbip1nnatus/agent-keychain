@@ -97,14 +97,61 @@ def cmd_uninstall(args):
     print("Agent Keychain uninstalled. Restart Claude Code to apply.")
 
 
+def _resolve_store_domains(args):
+    """Determine the allowed domains for a credential being stored.
+
+    Resolution order (deny-by-default with friction absorbed at setup time):
+      1. Explicit --allowed-domain flags win.
+      2. --allow-any marks the credential unrestricted (loud opt-out).
+      3. Otherwise infer from the service type's built-in map.
+      4. If the type is unknown, prompt once for domains rather than
+         silently storing a credential that can never be used.
+
+    Returns the resolved domain list (may be ["*"] for unrestricted).
+    """
+    from src.vault.domain_policy import infer_domains, WILDCARD
+
+    if args.allowed_domain:
+        return list(args.allowed_domain)
+
+    if args.allow_any:
+        print("⚠  Storing as UNRESTRICTED — this credential may be sent to any host.")
+        return [WILDCARD]
+
+    inferred = infer_domains(args.service_type)
+    if inferred:
+        print(f"Bound to: {', '.join(inferred)}")
+        return inferred
+
+    # Unknown service type and no domains given — prompt instead of storing dead.
+    print(f"No default domain is known for type '{args.service_type}'.")
+    entered = input("Enter allowed domain(s), comma-separated (or leave blank to abort): ").strip()
+    if not entered:
+        print("Aborted: a credential needs at least one allowed domain "
+              "(or use --allow-any to store it unrestricted).", file=sys.stderr)
+        sys.exit(1)
+    return [d.strip() for d in entered.split(",") if d.strip()]
+
+
 def cmd_store(args):
     """Store a credential in the OS keychain."""
     from src.vault.keychain_vault import KeychainVault
+    domains = _resolve_store_domains(args)
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
-    vault.store(args.name, secret, args.service_type, args.description, args.auth_type, ttl=args.ttl)
+    vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
+                ttl=args.ttl, allowed_domains=domains)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
     print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info})")
+
+
+def _format_domains(allowed_domains):
+    """Human-readable domain status for display in `list`."""
+    if not allowed_domains:
+        return "NO DOMAINS (blocked) ⚠"
+    if "*" in allowed_domains:
+        return "UNRESTRICTED ⚠"
+    return ", ".join(allowed_domains)
 
 
 def cmd_list(args):
@@ -118,6 +165,52 @@ def cmd_list(args):
     for c in creds:
         desc = f" — {c.description}" if c.description else ""
         print(f"  {c.name} ({c.service_type}, auth: {c.auth_type}){desc}")
+        print(f"      domains: {_format_domains(c.allowed_domains)}")
+
+
+def cmd_allow_domain(args):
+    """Add one or more allowed domains to an existing credential."""
+    from src.vault.keychain_vault import KeychainVault
+    vault = KeychainVault()
+    entry = vault.get(args.name)
+    if entry is None:
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    existing = list(entry.allowed_domains)
+    for d in args.allowed_domain:
+        if d not in existing:
+            existing.append(d)
+    vault.set_allowed_domains(args.name, existing)
+    print(f"Updated '{args.name}' domains: {_format_domains(existing)}")
+
+
+def cmd_migrate(args):
+    """Backfill allowed domains for credentials that have none, using their type."""
+    from src.vault.keychain_vault import KeychainVault
+    from src.vault.domain_policy import infer_domains
+    vault = KeychainVault()
+    backfilled, unmapped = [], []
+    for c in vault.list_credentials():
+        if c.allowed_domains:
+            continue
+        inferred = infer_domains(c.service_type)
+        if inferred:
+            vault.set_allowed_domains(c.name, inferred)
+            backfilled.append((c.name, inferred))
+        else:
+            unmapped.append(c.name)
+
+    if backfilled:
+        print("Backfilled domains:")
+        for name, domains in backfilled:
+            print(f"  {name} -> {', '.join(domains)}")
+    if unmapped:
+        print("\nNo default domain known for these (set manually with "
+              "`agent-keychain allow-domain <name> --allowed-domain <host>`):")
+        for name in unmapped:
+            print(f"  {name}")
+    if not backfilled and not unmapped:
+        print("Nothing to migrate — all credentials already have domains.")
 
 
 def cmd_delete(args):
@@ -153,9 +246,22 @@ def main():
                          help="Authentication type (default: bearer)")
     p_store.add_argument("--ttl", type=int, default=None,
                          help="Time-to-live in seconds (credential expires after this duration)")
+    p_store.add_argument("--allowed-domain", dest="allowed_domain", action="append", default=[],
+                         help="Domain this credential may be used against (repeatable, suffix match)")
+    p_store.add_argument("--allow-any", dest="allow_any", action="store_true",
+                         help="Store the credential unrestricted (sendable to any host) — use with care")
 
     # list
     sub.add_parser("list", help="List stored credentials")
+
+    # allow-domain
+    p_allow = sub.add_parser("allow-domain", help="Add allowed domain(s) to an existing credential")
+    p_allow.add_argument("name", help="Credential name")
+    p_allow.add_argument("--allowed-domain", dest="allowed_domain", action="append", required=True,
+                         help="Domain to allow (repeatable, suffix match)")
+
+    # migrate
+    sub.add_parser("migrate", help="Backfill allowed domains for credentials that have none")
 
     # delete
     p_delete = sub.add_parser("delete", help="Delete a credential")
@@ -168,6 +274,8 @@ def main():
         "uninstall": cmd_uninstall,
         "store": cmd_store,
         "list": cmd_list,
+        "allow-domain": cmd_allow_domain,
+        "migrate": cmd_migrate,
         "delete": cmd_delete,
     }
 
