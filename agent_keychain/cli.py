@@ -360,7 +360,7 @@ def cmd_exec(args):
         sys.exit(2)
 
     program = os.path.basename(command[0])
-    result = exec_runner.run(vault, args.credential, args.env, command)
+    result = exec_runner.run(vault, args.credential, args.env, command, sandbox=args.sandbox)
 
     if not result["ok"]:
         decision = audit_log.BLOCKED if result.get("blocked") else audit_log.ALLOWED
@@ -588,6 +588,8 @@ def main():
     p_exec.add_argument("--credential", required=True, help="Credential to inject")
     p_exec.add_argument("--env", action="append", default=[],
                         help="Env var to set to the secret in the child (repeatable)")
+    p_exec.add_argument("--sandbox", action="store_true",
+                        help="Run under an OS sandbox that denies reads of credential files (macOS only)")
     p_exec.add_argument("exec_command", nargs=argparse.REMAINDER, metavar="-- command ...",
                         help="-- followed by the command to run (use {secret} as an arg placeholder)")
 

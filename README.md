@@ -115,6 +115,14 @@ agent-keychain exec --credential aws-prod --env AWS_SECRET_ACCESS_KEY -- aws s3 
 
 A credential can only be injected into commands on its allowlist (empty by default — deny-by-default), so a credential can't be used with `exec` until you permit a specific binary. **Honest limitation:** the agent still chooses the command, so an allowlisted binary could in principle be coerced into leaking. The allowlist bounds *which* tools a credential can touch; it is not a full sandbox (see SECURITY.md).
 
+On macOS, add `--sandbox` to run the command under `sandbox-exec` with reads of known credential files (`~/.aws/credentials`, `~/.ssh`, `~/.npmrc`, `.env`, …) denied — so even a coerced command can't pull *other* secrets off disk:
+
+```bash
+agent-keychain exec --credential aws-prod --env AWS_SECRET_ACCESS_KEY --sandbox -- aws s3 ls
+```
+
+`--sandbox` is best-effort (macOS only, denies a fixed path list, no network restriction) and **fails closed** — if the sandbox isn't available it refuses to run rather than running unprotected. For hard isolation, run the agent in a container/VM.
+
 **Onboarding scan + import.** Agent Keychain only protects what's in its vault — but most leaks start with secrets already sitting in environment variables and dotfiles. `agent-keychain scan` checks your environment and common credential files and reports what it finds — only the location and credential type, never the secret value. Then `agent-keychain import` moves them in and (with `--scrub`) removes them from the source, keeping a `.bak`:
 
 ```bash
@@ -294,6 +302,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Rate Limiting** | Per-credential requests-per-minute cap | Rapid bulk use by a compromised agent |
 | **Command Allowlist** | `exec` deny-by-default command binding | A non-HTTP credential being injected into arbitrary commands |
 | **Approval Grants** | Human-opened time-limited use windows | Autonomous use of a sensitive credential without sign-off |
+| **OS Sandbox (exec)** | `sandbox-exec` denies credential-file reads (macOS) | An exec'd command pulling other secrets off disk |
 
 ### Threat Model & Limitations
 

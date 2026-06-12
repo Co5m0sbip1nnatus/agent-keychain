@@ -24,11 +24,12 @@ import time
 from agent_keychain.vault.command_policy import command_allowed
 from agent_keychain.vault.approval import is_blocked_pending_approval
 from agent_keychain.guard.credential_guard import scrub_response
+from agent_keychain import sandbox as _sandbox
 
 PLACEHOLDER = "{secret}"
 
 
-def run(vault, credential_name: str, env_names: list[str], command: list[str]) -> dict:
+def run(vault, credential_name: str, env_names: list[str], command: list[str], sandbox: bool = False) -> dict:
     """Run ``command`` with the credential injected. Returns a result dict.
 
     Result keys:
@@ -62,6 +63,15 @@ def run(vault, credential_name: str, env_names: list[str], command: list[str]) -
                       f"To permit: agent-keychain allow-command {credential_name} --command {os.path.basename(program)}"),
         }
 
+    # Fail closed: if a sandbox was requested but isn't available, don't run
+    # the command unprotected.
+    if sandbox and not _sandbox.is_available():
+        return {
+            "ok": False,
+            "blocked": True,
+            "error": "--sandbox requires macOS sandbox-exec, which is unavailable on this platform.",
+        }
+
     secure = vault.retrieve(credential_name)
     if secure is None:
         return {"ok": False, "error": f"credential '{credential_name}' not found or expired", "blocked": False}
@@ -72,6 +82,8 @@ def run(vault, credential_name: str, env_names: list[str], command: list[str]) -
         for name in env_names:
             child_env[name] = secret
         argv = [arg.replace(PLACEHOLDER, secret) for arg in command]
+        if sandbox:
+            argv = _sandbox.wrap_argv(argv)
         try:
             proc = subprocess.run(argv, env=child_env, capture_output=True, text=True)
         except FileNotFoundError:

@@ -31,11 +31,14 @@ The following are in scope:
   binaries it can be injected into (deny-by-default), but an allowlisted binary
   can in principle still be coerced into leaking the secret (e.g. piping an
   injected env var to an attacker). Treat the allowlist as least-privilege
-  scoping, not containment; pair it with OS-level sandboxing for hard isolation.
+  scoping, not containment. `exec --sandbox` (macOS) adds `sandbox-exec` denial
+  of credential-file reads and fails closed when unavailable, but it denies a
+  fixed path list and does not restrict network egress — for hard isolation,
+  run the agent in a container or VM.
 
 ## Supported Versions
 
 | Version | Supported |
 |---------|-----------|
-| 1.12.x  | Yes       |
-| < 1.12  | No        |
+| 1.13.x  | Yes       |
+| < 1.13  | No        |
