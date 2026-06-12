@@ -26,7 +26,7 @@ Agent                    Agent Keychain                  External API
 
 ## Components
 
-- **Vault** (`agent_keychain/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
+- **Vault** (`agent_keychain/vault/`) — credential store behind a pluggable backend: the OS keychain (macOS Keychain / Linux SecretService / Windows Credential Manager) by default, or a file backend for headless/CI (`backends.py`). Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
 - **MCP Server** (`agent_keychain/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
 - **Credential Guard** (`agent_keychain/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
 - **Process Isolation** (`agent_keychain/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
@@ -141,6 +141,25 @@ agent-keychain audit --suspicious          # group repeated blocks — a probing
 
 **Human-in-the-loop approval.** Mark a sensitive credential `store --require-approval` and it's blocked by default — the agent cannot use it on its own. A human opens a short, explicit window with `agent-keychain grant <name> --for 5m`; outside that window every request (HTTP or `exec`) is denied and audited. `agent-keychain revoke <name>` closes it immediately. This is a time-boxed grant rather than a synchronous prompt, so it works even with a headless MCP server.
 
+### Headless / CI
+
+The OS keychain isn't available on CI runners or in containers. Select the file
+backend so the same policy engine (domain binding, scoping, DLP, audit,
+approval) runs anywhere:
+
+```bash
+export AGENT_KEYCHAIN_BACKEND=file
+export AGENT_KEYCHAIN_STORE=/run/secrets/agent-keychain.json   # 0600 JSON file
+agent-keychain store ci-token --type github
+```
+
+The file backend stores secrets in a single owner-only JSON file — less
+protected than a keychain (plaintext on disk), so use it where the runner's
+filesystem is already the trust boundary (ephemeral CI). For production secret
+managers (HashiCorp Vault, AWS Secrets Manager, 1Password), implement the small
+`get`/`set`/`delete` backend interface in `agent_keychain/vault/backends.py` and
+select it the same way — those integrations are intentionally not bundled.
+
 ### 4. Use as MCP Server (with Claude Code)
 
 Create a `.mcp.json` in the project root:
@@ -219,6 +238,8 @@ agent-keychain/
 │   │   ├── domain_policy.py   # Per-credential allowed-domain matching
 │   │   ├── request_scope.py   # HTTP method + path allowlists
 │   │   ├── command_policy.py  # exec command allowlist matching
+│   │   ├── approval.py        # Human-in-the-loop grant windows
+│   │   ├── backends.py        # Pluggable storage (keychain / file / CI)
 │   │   └── rotation.py        # Rotation age / overdue policy
 │   ├── mcp_server/            # MCP server for AI agent integration
 │   │   └── server.py          # Enforces domain/scope/smuggling/rate-limit

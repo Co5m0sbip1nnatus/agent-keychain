@@ -1,17 +1,17 @@
 """
 Agent Keychain Vault
-Credential storage backed by the OS-native keychain (macOS Keychain / Linux SecretService).
+Credential storage behind a pluggable backend (OS keychain by default; a file
+backend for headless/CI). See agent_keychain.vault.backends.
 """
 
-import keyring
 import json
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import keyring.errors
 from agent_keychain.logging.logger import get_logger
 from agent_keychain.vault.secure_string import SecureString
+from agent_keychain.vault.backends import get_backend, BackendError
 
 log = get_logger("vault")
 
@@ -61,12 +61,13 @@ class KeychainVault:
     SERVICE_NAME = "agent-keychain"
     METADATA_KEY = "_metadata"
 
-    def __init__(self):
+    def __init__(self, backend=None):
+        self._backend = backend if backend is not None else get_backend()
         self._metadata: dict[str, CredentialEntry] = {}
         self._load_metadata()
-    
+
     def _save_metadata(self):
-        """Serialize credential metadata to the keychain."""
+        """Serialize credential metadata to the backend."""
         data = {}
         for name, entry in self._metadata.items():
             data[name] = {
@@ -86,11 +87,7 @@ class KeychainVault:
                 "require_approval": entry.require_approval,
                 "grant_until": entry.grant_until,
             }
-        keyring.set_password(
-            self.SERVICE_NAME,
-            self.METADATA_KEY,
-            json.dumps(data)
-        )
+        self._backend.set(self.METADATA_KEY, json.dumps(data))
     
     def reload(self):
         """Refresh in-memory metadata from the keychain.
@@ -104,8 +101,8 @@ class KeychainVault:
         self._load_metadata()
 
     def _load_metadata(self):
-        """Load credential metadata from the keychain."""
-        raw = keyring.get_password(self.SERVICE_NAME, self.METADATA_KEY)
+        """Load credential metadata from the backend."""
+        raw = self._backend.get(self.METADATA_KEY)
         if raw is None:
             return
         try:
@@ -156,10 +153,10 @@ class KeychainVault:
         expires_at = now + ttl if ttl is not None else None
 
         try:
-            keyring.set_password(self.SERVICE_NAME, name, secret)
-        except keyring.errors.PasswordSetError as e:
-            log.error("Failed to store credential '%s' in keychain", name)
-            raise RuntimeError(f"Failed to store credential '{name}' in keychain") from e
+            self._backend.set(name, secret)
+        except BackendError as e:
+            log.error("Failed to store credential '%s'", name)
+            raise RuntimeError(f"Failed to store credential '{name}'") from e
 
         if expires_at is not None:
             log.info("Stored credential '%s' (type: %s, auth: %s, expires in %ds)", name, service_type, auth_type, ttl)
@@ -219,10 +216,10 @@ class KeychainVault:
             return False
 
         try:
-            keyring.set_password(self.SERVICE_NAME, name, new_secret)
-        except keyring.errors.PasswordSetError as e:
-            log.error("Failed to rotate credential '%s' in keychain", name)
-            raise RuntimeError(f"Failed to rotate credential '{name}' in keychain") from e
+            self._backend.set(name, new_secret)
+        except BackendError as e:
+            log.error("Failed to rotate credential '%s'", name)
+            raise RuntimeError(f"Failed to rotate credential '{name}'") from e
 
         entry.last_rotated_at = time.time()
         entry.rotation_count += 1
@@ -250,19 +247,16 @@ class KeychainVault:
             self.delete(name)
             return None
 
-        raw = keyring.get_password(self.SERVICE_NAME, name)
+        raw = self._backend.get(name)
         if raw is None:
             return None
         return SecureString(raw)
-    
+
     def delete(self, name: str) -> bool:
-        """Remove a credential from the keychain. Returns True if deleted."""
+        """Remove a credential from the store. Returns True if deleted."""
         if name not in self._metadata:
             return False
-        try:
-            keyring.delete_password(self.SERVICE_NAME, name)
-        except keyring.errors.PasswordDeleteError:
-            pass
+        self._backend.delete(name)
         del self._metadata[name]
         self._save_metadata()
         log.info("Deleted credential '%s'", name)
