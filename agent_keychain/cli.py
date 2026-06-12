@@ -306,6 +306,28 @@ def cmd_audit(args):
               f"{e.get('method','')} {e.get('host','')}{status_str}{reason_str}")
 
 
+def cmd_scan(args):
+    """Find credentials living outside the vault (env vars + common files)."""
+    from agent_keychain.guard.env_scanner import scan_environment
+    findings = scan_environment(extra_files=args.path or None)
+    if not findings:
+        print("No credentials found outside the vault. ✓")
+        return
+
+    # Group by source for a readable report (values are never shown).
+    by_source: dict[str, list[dict]] = {}
+    for f in findings:
+        by_source.setdefault(f["source"], []).append(f)
+
+    print(f"Found credentials outside the vault in {len(by_source)} location(s):\n")
+    for source, items in by_source.items():
+        kinds = ", ".join(f"{i['count']}x {i['type']}" for i in items)
+        print(f"  {source}\n      {kinds}")
+    print("\nThese are readable by any agent with shell access. Move them into the")
+    print("vault so requests go through the proxy instead:")
+    print("  agent-keychain store <name> --type <service> --allowed-domain <host>")
+
+
 def cmd_delete(args):
     """Delete a credential from the OS keychain."""
     from agent_keychain.vault.keychain_vault import KeychainVault
@@ -385,6 +407,11 @@ def main():
     p_audit.add_argument("--suspicious", action="store_true",
                          help="Summarize repeated blocked requests (probing / misuse signal)")
 
+    # scan
+    p_scan = sub.add_parser("scan", help="Find credentials living outside the vault (env vars + common files)")
+    p_scan.add_argument("--path", action="append", default=[],
+                        help="Additional file to scan (repeatable)")
+
     # delete
     p_delete = sub.add_parser("delete", help="Delete a credential")
     p_delete.add_argument("name", help="Credential name to delete")
@@ -401,6 +428,7 @@ def main():
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,
         "audit": cmd_audit,
+        "scan": cmd_scan,
         "delete": cmd_delete,
     }
 

@@ -27,5 +27,5 @@ The following are in scope:
 
 | Version | Supported |
 |---------|-----------|
-| 1.6.x   | Yes       |
-| < 1.6   | No        |
+| 1.7.x   | Yes       |
+| < 1.7   | No        |
