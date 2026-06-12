@@ -140,9 +140,23 @@ def cmd_store(args):
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
     vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
-                ttl=args.ttl, allowed_domains=domains)
+                ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
-    print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info})")
+    rot_info = f", rotate every {args.rotate_after}d" if args.rotate_after else ""
+    print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info}{rot_info})")
+
+
+def cmd_rotate(args):
+    """Replace the secret for an existing credential."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    vault = KeychainVault()
+    if not vault.has(args.name):
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    new_secret = getpass.getpass("New secret: ")
+    vault.rotate(args.name, new_secret)
+    entry = vault.get(args.name)
+    print(f"Rotated '{args.name}' (rotation #{entry.rotation_count})")
 
 
 def _format_domains(allowed_domains):
@@ -154,18 +168,37 @@ def _format_domains(allowed_domains):
     return ", ".join(allowed_domains)
 
 
+def _format_rotation(entry, now):
+    """Human-readable rotation/age status for display in `list`."""
+    from agent_keychain.vault.rotation import days_since_rotation, is_rotation_due
+    age = days_since_rotation(entry, now)
+    if age is None:
+        return None
+    age_str = f"{int(age)}d old"
+    if entry.rotate_after_days:
+        if is_rotation_due(entry, now):
+            return f"{age_str} — ROTATION DUE (policy: {entry.rotate_after_days}d) ⚠"
+        return f"{age_str} (rotate every {entry.rotate_after_days}d)"
+    return age_str
+
+
 def cmd_list(args):
     """List all stored credentials."""
+    import time
     from agent_keychain.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     creds = vault.list_credentials()
     if not creds:
         print("No credentials stored.")
         return
+    now = time.time()
     for c in creds:
         desc = f" — {c.description}" if c.description else ""
         print(f"  {c.name} ({c.service_type}, auth: {c.auth_type}){desc}")
         print(f"      domains: {_format_domains(c.allowed_domains)}")
+        rotation = _format_rotation(c, now)
+        if rotation:
+            print(f"      rotation: {rotation}")
 
 
 def cmd_allow_domain(args):
@@ -271,9 +304,15 @@ def main():
                          help="Domain this credential may be used against (repeatable, suffix match)")
     p_store.add_argument("--allow-any", dest="allow_any", action="store_true",
                          help="Store the credential unrestricted (sendable to any host) — use with care")
+    p_store.add_argument("--rotate-after", dest="rotate_after", type=int, default=None,
+                         help="Rotation policy in days; the credential is flagged overdue after this long")
 
     # list
     sub.add_parser("list", help="List stored credentials")
+
+    # rotate
+    p_rotate = sub.add_parser("rotate", help="Replace the secret for an existing credential")
+    p_rotate.add_argument("name", help="Credential name to rotate")
 
     # allow-domain
     p_allow = sub.add_parser("allow-domain", help="Add allowed domain(s) to an existing credential")
@@ -302,6 +341,7 @@ def main():
         "uninstall": cmd_uninstall,
         "store": cmd_store,
         "list": cmd_list,
+        "rotate": cmd_rotate,
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,
         "audit": cmd_audit,

@@ -74,17 +74,21 @@ Options:
 --ttl 3600                         # Auto-expire after N seconds
 --allowed-domain api.github.com    # Bind to a domain (repeatable; suffix match covers subdomains)
 --allow-any                        # Store unrestricted — sendable to any host (use with care)
+--rotate-after 90                  # Rotation policy in days; flagged overdue once exceeded
 ```
 
 Other credential commands:
 
 ```bash
-agent-keychain list                                    # List credentials and their bound domains
+agent-keychain list                                    # List credentials, bound domains, and rotation status
+agent-keychain rotate my-token                         # Replace a credential's secret (keeps its metadata)
 agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
 agent-keychain migrate                                 # Backfill domains for credentials that have none
 agent-keychain audit                                   # Show recent credential-usage events
 agent-keychain delete my-token                         # Delete a credential
 ```
+
+**Rotation.** Long-lived secrets are a liability — the longer a token stays valid, the longer a leaked copy is useful. Set a rotation policy with `--rotate-after <days>` when storing; `agent-keychain list` then shows each credential's age and flags any that are overdue (`ROTATION DUE ⚠`). When it's time, `agent-keychain rotate <name>` prompts for the new secret and swaps it in place, preserving the credential's domains, auth type, and other metadata.
 
 **Audit log.** Every request made through `secure_http_request` is recorded to `~/.agent-keychain/audit.jsonl` (owner-only) — credential name, destination host, method, the allow/block decision, and response status. Secret values, full URLs, and request/response bodies are never written, so the log itself cannot leak a credential. Review it with:
 
@@ -196,6 +200,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |
 | **Process Isolation** | Short-lived subprocess for HTTP | Long-lived process accumulating secrets |
 | **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |
+| **Rotation Policy** | Age tracking + overdue flagging + in-place rotation | Long-lived secrets accumulating exposure |
 | **Audit Log** | Append-only record of every credential use | Undetected misuse / exfiltration attempts |
 
 ### Threat Model & Limitations

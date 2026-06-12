@@ -30,6 +30,11 @@ class CredentialEntry:
     # the credential is blocked from all outbound requests (deny-by-default).
     # The special value ["*"] marks the credential as explicitly unrestricted.
     allowed_domains: list[str] = field(default_factory=list)
+    # Rotation tracking. last_rotated_at defaults to created_at on first store.
+    # rotate_after_days is an optional policy used to flag overdue credentials.
+    last_rotated_at: Optional[float] = None
+    rotate_after_days: Optional[int] = None
+    rotation_count: int = 0
 
 class KeychainVault:
     """
@@ -57,6 +62,9 @@ class KeychainVault:
                 "auth_type": entry.auth_type,
                 "expires_at": entry.expires_at,
                 "allowed_domains": entry.allowed_domains,
+                "last_rotated_at": entry.last_rotated_at,
+                "rotate_after_days": entry.rotate_after_days,
+                "rotation_count": entry.rotation_count,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -80,11 +88,14 @@ class KeychainVault:
                     auth_type=info.get("auth_type", "bearer"),
                     expires_at=info.get("expires_at"),
                     allowed_domains=info.get("allowed_domains", []),
+                    last_rotated_at=info.get("last_rotated_at"),
+                    rotate_after_days=info.get("rotate_after_days"),
+                    rotation_count=info.get("rotation_count", 0),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
@@ -95,6 +106,9 @@ class KeychainVault:
                  blocked from outbound requests until domains are set; the
                  special value ["*"] marks it as explicitly unrestricted.
                  Enforcement happens at request time, not here.
+            rotate_after_days: Optional rotation policy. If set, the credential
+                 is flagged as overdue once this many days pass since it was
+                 last rotated (or created).
         """
         if not name or not secret:
             raise ValueError("Credential name and secret must not be empty")
@@ -123,8 +137,36 @@ class KeychainVault:
             auth_type=auth_type,
             expires_at=expires_at,
             allowed_domains=list(allowed_domains) if allowed_domains else [],
+            last_rotated_at=now,
+            rotate_after_days=rotate_after_days,
+            rotation_count=0,
         )
         self._save_metadata()
+
+    def rotate(self, name: str, new_secret: str) -> bool:
+        """Replace the secret for an existing credential, keeping its metadata.
+
+        Updates the keychain entry and records the rotation (last_rotated_at,
+        rotation_count). Returns False if the credential does not exist.
+        Raises ValueError on an empty secret.
+        """
+        if not new_secret:
+            raise ValueError("New secret must not be empty")
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+
+        try:
+            keyring.set_password(self.SERVICE_NAME, name, new_secret)
+        except keyring.errors.PasswordSetError as e:
+            log.error("Failed to rotate credential '%s' in keychain", name)
+            raise RuntimeError(f"Failed to rotate credential '{name}' in keychain") from e
+
+        entry.last_rotated_at = time.time()
+        entry.rotation_count += 1
+        self._save_metadata()
+        log.info("Rotated credential '%s' (rotation #%d)", name, entry.rotation_count)
+        return True
 
     def retrieve(self, name: str) -> Optional[SecureString]:
         """Retrieve a secret value from the keychain wrapped in a SecureString.
