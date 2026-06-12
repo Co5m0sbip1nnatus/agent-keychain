@@ -45,6 +45,10 @@ class CredentialEntry:
     # Commands this credential may be injected into via `exec` (basename glob).
     # Empty means the credential cannot be used with exec at all (deny-by-default).
     allowed_commands: list[str] = field(default_factory=list)
+    # Human-in-the-loop: if require_approval is set, the credential is blocked
+    # unless a human has opened a time-limited grant window (grant_until).
+    require_approval: bool = False
+    grant_until: Optional[float] = None
 
 class KeychainVault:
     """
@@ -79,6 +83,8 @@ class KeychainVault:
                 "allowed_paths": entry.allowed_paths,
                 "rate_limit_per_min": entry.rate_limit_per_min,
                 "allowed_commands": entry.allowed_commands,
+                "require_approval": entry.require_approval,
+                "grant_until": entry.grant_until,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -120,11 +126,13 @@ class KeychainVault:
                     allowed_paths=info.get("allowed_paths", []),
                     rate_limit_per_min=info.get("rate_limit_per_min"),
                     allowed_commands=info.get("allowed_commands", []),
+                    require_approval=info.get("require_approval", False),
+                    grant_until=info.get("grant_until"),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None, rate_limit_per_min: Optional[int] = None, allowed_commands: Optional[list[str]] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None, rate_limit_per_min: Optional[int] = None, allowed_commands: Optional[list[str]] = None, require_approval: bool = False) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
@@ -173,8 +181,29 @@ class KeychainVault:
             allowed_paths=list(allowed_paths) if allowed_paths else [],
             rate_limit_per_min=rate_limit_per_min,
             allowed_commands=list(allowed_commands) if allowed_commands else [],
+            require_approval=require_approval,
         )
         self._save_metadata()
+
+    def grant(self, name: str, seconds: int) -> bool:
+        """Open an approval window of ``seconds`` for a credential. False if missing."""
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+        entry.grant_until = time.time() + seconds
+        self._save_metadata()
+        log.info("Granted '%s' for %ds", name, seconds)
+        return True
+
+    def revoke(self, name: str) -> bool:
+        """Close any open approval window immediately. False if credential missing."""
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+        entry.grant_until = None
+        self._save_metadata()
+        log.info("Revoked grant for '%s'", name)
+        return True
 
     def rotate(self, name: str, new_secret: str) -> bool:
         """Replace the secret for an existing credential, keeping its metadata.

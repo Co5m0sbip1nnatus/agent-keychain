@@ -96,6 +96,8 @@ Other credential commands:
 agent-keychain list                                    # List credentials, bound domains, and rotation status
 agent-keychain rotate my-token                         # Replace a credential's secret (keeps its metadata)
 agent-keychain scope my-token --allowed-method GET     # Restrict an existing credential's methods/paths
+agent-keychain grant my-token --for 5m                 # Open a human-approved window for a gated credential
+agent-keychain revoke my-token                         # Close the approval window now
 agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
 agent-keychain migrate                                 # Backfill domains for credentials that have none
 agent-keychain audit                                   # Show recent credential-usage events
@@ -136,6 +138,8 @@ agent-keychain audit --suspicious          # group repeated blocks — a probing
 ```
 
 **Rate limiting.** Cap how often a credential can be used with `store --rate-limit <n>` (requests per minute). Once the limit is hit, further requests are blocked (and audited) until the window clears — bounding how fast a compromised agent can use a token.
+
+**Human-in-the-loop approval.** Mark a sensitive credential `store --require-approval` and it's blocked by default — the agent cannot use it on its own. A human opens a short, explicit window with `agent-keychain grant <name> --for 5m`; outside that window every request (HTTP or `exec`) is denied and audited. `agent-keychain revoke <name>` closes it immediately. This is a time-boxed grant rather than a synchronous prompt, so it works even with a headless MCP server.
 
 ### 4. Use as MCP Server (with Claude Code)
 
@@ -268,6 +272,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Audit Log** | Append-only record of every credential use | Undetected misuse / exfiltration attempts |
 | **Rate Limiting** | Per-credential requests-per-minute cap | Rapid bulk use by a compromised agent |
 | **Command Allowlist** | `exec` deny-by-default command binding | A non-HTTP credential being injected into arbitrary commands |
+| **Approval Grants** | Human-opened time-limited use windows | Autonomous use of a sensitive credential without sign-off |
 
 ### Threat Model & Limitations
 

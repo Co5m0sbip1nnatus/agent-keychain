@@ -143,7 +143,8 @@ def cmd_store(args):
     vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
                 ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after,
                 allowed_methods=args.allowed_method, allowed_paths=args.allowed_path,
-                rate_limit_per_min=args.rate_limit, allowed_commands=args.allowed_command)
+                rate_limit_per_min=args.rate_limit, allowed_commands=args.allowed_command,
+                require_approval=args.require_approval)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
     rot_info = f", rotate every {args.rotate_after}d" if args.rotate_after else ""
     print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info}{rot_info})")
@@ -166,6 +167,32 @@ def cmd_scope(args):
     e = vault.get(args.name)
     print(f"Updated scope for '{args.name}': "
           f"methods={', '.join(e.allowed_methods) or 'any'}, paths={', '.join(e.allowed_paths) or 'any'}")
+
+
+def cmd_grant(args):
+    """Open a time-limited approval window for a credential."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.approval import parse_duration
+    try:
+        seconds = parse_duration(args.duration)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    vault = KeychainVault()
+    if not vault.grant(args.name, seconds):
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Granted '{args.name}' for {args.duration} ({seconds}s). The agent may use it until the window closes.")
+
+
+def cmd_revoke(args):
+    """Immediately close a credential's approval window."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    vault = KeychainVault()
+    if not vault.revoke(args.name):
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Revoked grant for '{args.name}'.")
 
 
 def cmd_rotate(args):
@@ -226,6 +253,12 @@ def cmd_list(args):
             print(f"      rate limit: {c.rate_limit_per_min}/min")
         if c.allowed_commands:
             print(f"      exec: {', '.join(c.allowed_commands)}")
+        if c.require_approval:
+            from agent_keychain.vault.approval import grant_active, grant_remaining
+            if grant_active(c, now):
+                print(f"      approval: GRANTED ({int(grant_remaining(c, now))}s left)")
+            else:
+                print(f"      approval: REQUIRED (no open window) ⚠")
         rotation = _format_rotation(c, now)
         if rotation:
             print(f"      rotation: {rotation}")
@@ -507,6 +540,8 @@ def main():
                          help="Max requests per minute for this credential (default: unlimited)")
     p_store.add_argument("--allowed-command", dest="allowed_command", action="append", default=[],
                          help="Command this credential may be injected into via exec (repeatable, e.g. aws)")
+    p_store.add_argument("--require-approval", dest="require_approval", action="store_true",
+                         help="Block use until a human opens a grant window (agent-keychain grant)")
 
     # list
     sub.add_parser("list", help="List stored credentials")
@@ -514,6 +549,13 @@ def main():
     # rotate
     p_rotate = sub.add_parser("rotate", help="Replace the secret for an existing credential")
     p_rotate.add_argument("name", help="Credential name to rotate")
+
+    # grant / revoke
+    p_grant = sub.add_parser("grant", help="Open a time-limited approval window for a credential")
+    p_grant.add_argument("name", help="Credential name")
+    p_grant.add_argument("--for", dest="duration", required=True, help="Window length, e.g. 30s, 5m, 2h")
+    p_revoke = sub.add_parser("revoke", help="Close a credential's approval window immediately")
+    p_revoke.add_argument("name", help="Credential name")
 
     # scope
     p_scope = sub.add_parser("scope", help="Set request scope (methods/paths) for an existing credential")
@@ -586,6 +628,8 @@ def main():
         "store": cmd_store,
         "list": cmd_list,
         "rotate": cmd_rotate,
+        "grant": cmd_grant,
+        "revoke": cmd_revoke,
         "scope": cmd_scope,
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,

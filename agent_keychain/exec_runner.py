@@ -19,8 +19,10 @@ credential can touch; it is not a full sandbox. See SECURITY.md.
 
 import os
 import subprocess
+import time
 
 from agent_keychain.vault.command_policy import command_allowed
+from agent_keychain.vault.approval import is_blocked_pending_approval
 from agent_keychain.guard.credential_guard import scrub_response
 
 PLACEHOLDER = "{secret}"
@@ -40,6 +42,14 @@ def run(vault, credential_name: str, env_names: list[str], command: list[str]) -
     entry = vault.get(credential_name)
     if entry is None:
         return {"ok": False, "error": f"credential '{credential_name}' not found", "blocked": False}
+
+    if is_blocked_pending_approval(entry, time.time()):
+        return {
+            "ok": False,
+            "blocked": True,
+            "error": (f"credential '{credential_name}' requires human approval and no grant window is open. "
+                      f"A human must run: agent-keychain grant {credential_name} --for 5m"),
+        }
 
     program = command[0]
     if not command_allowed(program, entry.allowed_commands):

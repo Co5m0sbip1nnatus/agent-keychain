@@ -37,5 +37,5 @@ The following are in scope:
 
 | Version | Supported |
 |---------|-----------|
-| 1.10.x  | Yes       |
-| < 1.10  | No        |
+| 1.11.x  | Yes       |
+| < 1.11  | No        |
