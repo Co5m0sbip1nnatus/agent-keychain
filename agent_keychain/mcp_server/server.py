@@ -23,6 +23,7 @@ mcp = FastMCP("agent-keychain")
 @mcp.tool()
 def check_connection() -> str:
     """Check if the Agent Keychain proxy is running and accessible."""
+    vault.reload()
     count = len(vault.list_credentials())
     return f"Agent Keychain is active. {count} credential(s) available."
 
@@ -33,6 +34,7 @@ def list_available_credentials() -> str:
     No secret values are ever returned -- only names and types.
     Use this to discover which credentials are available before making requests.
     """
+    vault.reload()
     creds = vault.list_credentials()
     if not creds:
         return "No credentials stored. Use the CLI to add credentials first."
@@ -70,6 +72,9 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
 
     # Parse the destination host up front so it can be audited even on rejection.
     host = extract_host(url)
+
+    # Pick up any credentials added/changed by the CLI since the server started.
+    vault.reload()
 
     # Check credential exists before spawning subprocess
     entry = vault.get(credential_name)

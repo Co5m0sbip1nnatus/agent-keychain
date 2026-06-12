@@ -9,7 +9,7 @@ def vault():
     v = KeychainVault()
     yield v
     # Cleanup: delete test credentials
-    for name in ["test-cred", "test-empty"]:
+    for name in ["test-cred", "test-empty", "test-reload"]:
         v.delete(name)
     
 def test_store_and_retrieve(vault):
@@ -62,6 +62,16 @@ def test_store_without_domains_defaults_empty(vault):
     """Storing without domains yields an empty (deny-by-default) list."""
     vault.store("test-cred", "secret123", "test")
     assert vault.get("test-cred").allowed_domains == []
+
+
+def test_reload_picks_up_external_changes(vault):
+    """A second vault instance (like a long-running server) sees new
+    credentials only after reload() — mirroring the CLI/server split."""
+    server_view = KeychainVault()  # constructed before the store, like a running server
+    vault.store("test-reload", "secret", "github", allowed_domains=["github.com"])
+    assert server_view.get("test-reload") is None      # stale cache
+    server_view.reload()
+    assert server_view.get("test-reload") is not None   # fresh after reload
 
 
 def test_set_allowed_domains(vault):

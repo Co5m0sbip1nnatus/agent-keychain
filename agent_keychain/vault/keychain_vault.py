@@ -82,6 +82,17 @@ class KeychainVault:
             json.dumps(data)
         )
     
+    def reload(self):
+        """Refresh in-memory metadata from the keychain.
+
+        Metadata is cached in memory at construction, so a long-lived process
+        (e.g. the MCP server) won't otherwise see credentials added, rotated,
+        or deleted by a separate process (e.g. the CLI) after it started. Call
+        this before reads that must reflect the current on-disk state.
+        """
+        self._metadata = {}
+        self._load_metadata()
+
     def _load_metadata(self):
         """Load credential metadata from the keychain."""
         raw = keyring.get_password(self.SERVICE_NAME, self.METADATA_KEY)
