@@ -75,13 +75,25 @@ Options:
 --allowed-domain api.github.com    # Bind to a domain (repeatable; suffix match covers subdomains)
 --allow-any                        # Store unrestricted — sendable to any host (use with care)
 --rotate-after 90                  # Rotation policy in days; flagged overdue once exceeded
+--allowed-method GET               # Restrict to HTTP method(s) (repeatable; default: any)
+--allowed-path /repos/*            # Restrict to URL path glob(s) (repeatable; default: any)
 ```
+
+**Least-privilege request scope.** Domain binding limits *where* a credential goes; scoping limits *what* it can do there. Restrict a credential to specific HTTP methods and URL paths so a tricked agent can't do more than intended — e.g. a read-only GitHub token:
+
+```bash
+agent-keychain store gh-readonly --type github --allowed-method GET --allowed-path '/repos/*'
+agent-keychain scope my-token --allowed-method GET   # tighten an existing credential
+```
+
+Requests are also scanned before they leave: if the URL or body contains what looks like *another* credential, the proxy blocks the request so a secret can't be smuggled out through an otherwise-allowed host.
 
 Other credential commands:
 
 ```bash
 agent-keychain list                                    # List credentials, bound domains, and rotation status
 agent-keychain rotate my-token                         # Replace a credential's secret (keeps its metadata)
+agent-keychain scope my-token --allowed-method GET     # Restrict an existing credential's methods/paths
 agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
 agent-keychain migrate                                 # Backfill domains for credentials that have none
 agent-keychain audit                                   # Show recent credential-usage events
@@ -195,6 +207,8 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 |-------|---------|-----------------|
 | **Vault** | OS keychain encryption | Credentials stored in plaintext files |
 | **Domain Binding** | Per-credential allowed-domain enforcement | Token exfiltration to attacker-controlled endpoints |
+| **Request Scoping** | Per-credential HTTP method + path allowlist | Over-broad use of a credential (least privilege) |
+| **Smuggling Guard** | Scan of outbound URL/body for credentials | Exfiltrating a second secret via an allowed host |
 | **Credential Guard** | Pattern-based redaction | Secrets leaking into LLM context window |
 | **Hook Enforcement** | Path-blocklist + content scan on reads | Agent reading credential files directly |
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |

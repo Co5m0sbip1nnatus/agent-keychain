@@ -10,6 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from agent_keychain.vault.keychain_vault import KeychainVault
 from agent_keychain.vault.domain_policy import host_allowed, extract_host
+from agent_keychain.vault.request_scope import method_allowed, path_allowed, extract_path
 from agent_keychain.guard.credential_guard import redact, scan
 from agent_keychain.proxy.process_pool import run_isolated_request
 from agent_keychain.audit import audit_log
@@ -99,6 +100,34 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
             f"Error: credential '{credential_name}' is not allowed to call '{host}'. "
             f"Allowed: {', '.join(entry.allowed_domains)}. "
             f"To permit: agent-keychain allow-domain {credential_name} --allowed-domain {host}"
+        )
+
+    # Enforce least-privilege request scope (method + path), if set.
+    if not method_allowed(method, entry.allowed_methods):
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, "method not in scope")
+        return (
+            f"Error: credential '{credential_name}' is not allowed to use method '{method}'. "
+            f"Allowed: {', '.join(entry.allowed_methods)}."
+        )
+    path = extract_path(url)
+    if not path_allowed(path, entry.allowed_paths):
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, "path not in scope")
+        return (
+            f"Error: credential '{credential_name}' is not allowed to access path '{path}'. "
+            f"Allowed: {', '.join(entry.allowed_paths)}."
+        )
+
+    # Outbound secret-smuggling guard: block if the URL or body carries OTHER
+    # credentials. This stops a prompt-injected agent from exfiltrating a
+    # second secret by hiding it in a request to an otherwise-allowed host.
+    smuggled = scan(url + "\n" + body)
+    if smuggled:
+        kinds = ", ".join(f["type"] for f in smuggled)
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, f"secret in request ({kinds})")
+        log.warning("Blocked request: credential material detected in outbound request (%s)", kinds)
+        return (
+            f"Error: request blocked — it contains what looks like credential material "
+            f"({kinds}) in the URL or body. Secrets must not be sent through this proxy."
         )
 
     auth_type = entry.auth_type

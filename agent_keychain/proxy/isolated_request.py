@@ -28,6 +28,7 @@ sys.path.insert(0, _project_root)
 
 from agent_keychain.vault.keychain_vault import KeychainVault
 from agent_keychain.vault.domain_policy import host_allowed, extract_host
+from agent_keychain.vault.request_scope import method_allowed, path_allowed, extract_path
 
 
 def _build_auth_header(auth_type: str, secret: str) -> tuple[str, str]:
@@ -96,7 +97,7 @@ def main() -> None:
         sys.stdout.write(json.dumps(result))
         sys.exit(1)
 
-    # --- Enforce domain binding before touching the secret ---
+    # --- Enforce domain binding + request scope before touching the secret ---
     vault = KeychainVault()
     entry = vault.get(credential_name)
     if entry is not None:
@@ -106,6 +107,20 @@ def main() -> None:
                 "success": False,
                 "error": f"Credential '{credential_name}' is not allowed to call '{host}' "
                          "(domain binding). Use 'agent-keychain allow-domain' to permit it.",
+            }
+            sys.stdout.write(json.dumps(result))
+            sys.exit(1)
+        if not method_allowed(method, entry.allowed_methods):
+            result = {
+                "success": False,
+                "error": f"Credential '{credential_name}' is not allowed to use method '{method}' (request scope).",
+            }
+            sys.stdout.write(json.dumps(result))
+            sys.exit(1)
+        if not path_allowed(extract_path(url), entry.allowed_paths):
+            result = {
+                "success": False,
+                "error": f"Credential '{credential_name}' is not allowed to access that path (request scope).",
             }
             sys.stdout.write(json.dumps(result))
             sys.exit(1)

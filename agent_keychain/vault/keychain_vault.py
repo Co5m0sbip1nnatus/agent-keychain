@@ -35,6 +35,11 @@ class CredentialEntry:
     last_rotated_at: Optional[float] = None
     rotate_after_days: Optional[int] = None
     rotation_count: int = 0
+    # Least-privilege request scope. Empty lists mean "unrestricted" for that
+    # dimension. allowed_methods is a set of HTTP verbs; allowed_paths is a list
+    # of URL path globs (e.g. "/repos/*"). Enforced at request time.
+    allowed_methods: list[str] = field(default_factory=list)
+    allowed_paths: list[str] = field(default_factory=list)
 
 class KeychainVault:
     """
@@ -65,6 +70,8 @@ class KeychainVault:
                 "last_rotated_at": entry.last_rotated_at,
                 "rotate_after_days": entry.rotate_after_days,
                 "rotation_count": entry.rotation_count,
+                "allowed_methods": entry.allowed_methods,
+                "allowed_paths": entry.allowed_paths,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -91,11 +98,13 @@ class KeychainVault:
                     last_rotated_at=info.get("last_rotated_at"),
                     rotate_after_days=info.get("rotate_after_days"),
                     rotation_count=info.get("rotation_count", 0),
+                    allowed_methods=info.get("allowed_methods", []),
+                    allowed_paths=info.get("allowed_paths", []),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
@@ -140,6 +149,8 @@ class KeychainVault:
             last_rotated_at=now,
             rotate_after_days=rotate_after_days,
             rotation_count=0,
+            allowed_methods=[m.upper() for m in allowed_methods] if allowed_methods else [],
+            allowed_paths=list(allowed_paths) if allowed_paths else [],
         )
         self._save_metadata()
 
@@ -226,6 +237,24 @@ class KeychainVault:
         entry.allowed_domains = list(allowed_domains)
         self._save_metadata()
         log.info("Updated allowed domains for '%s': %s", name, ", ".join(allowed_domains) or "(none)")
+        return True
+
+    def set_scope(self, name: str, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None) -> bool:
+        """Set the request scope (methods/paths) for an existing credential.
+
+        Only the dimensions passed (non-None) are replaced. Returns False if
+        the credential does not exist.
+        """
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+        if allowed_methods is not None:
+            entry.allowed_methods = [m.upper() for m in allowed_methods]
+        if allowed_paths is not None:
+            entry.allowed_paths = list(allowed_paths)
+        self._save_metadata()
+        log.info("Updated request scope for '%s' (methods: %s, paths: %s)", name,
+                 ", ".join(entry.allowed_methods) or "any", ", ".join(entry.allowed_paths) or "any")
         return True
 
     def has(self, name: str) -> bool:

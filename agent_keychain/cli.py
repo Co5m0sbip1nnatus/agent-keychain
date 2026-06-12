@@ -140,10 +140,30 @@ def cmd_store(args):
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
     vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
-                ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after)
+                ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after,
+                allowed_methods=args.allowed_method, allowed_paths=args.allowed_path)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
     rot_info = f", rotate every {args.rotate_after}d" if args.rotate_after else ""
     print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info}{rot_info})")
+
+
+def cmd_scope(args):
+    """Set the request scope (methods/paths) for an existing credential."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    vault = KeychainVault()
+    entry = vault.get(args.name)
+    if entry is None:
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    methods = args.allowed_method if args.allowed_method else None
+    paths = args.allowed_path if args.allowed_path else None
+    if methods is None and paths is None:
+        print("Specify at least one --allowed-method or --allowed-path.", file=sys.stderr)
+        sys.exit(1)
+    vault.set_scope(args.name, allowed_methods=methods, allowed_paths=paths)
+    e = vault.get(args.name)
+    print(f"Updated scope for '{args.name}': "
+          f"methods={', '.join(e.allowed_methods) or 'any'}, paths={', '.join(e.allowed_paths) or 'any'}")
 
 
 def cmd_rotate(args):
@@ -196,6 +216,10 @@ def cmd_list(args):
         desc = f" — {c.description}" if c.description else ""
         print(f"  {c.name} ({c.service_type}, auth: {c.auth_type}){desc}")
         print(f"      domains: {_format_domains(c.allowed_domains)}")
+        if c.allowed_methods or c.allowed_paths:
+            methods = ", ".join(c.allowed_methods) if c.allowed_methods else "any"
+            paths = ", ".join(c.allowed_paths) if c.allowed_paths else "any"
+            print(f"      scope: methods={methods}, paths={paths}")
         rotation = _format_rotation(c, now)
         if rotation:
             print(f"      rotation: {rotation}")
@@ -306,6 +330,10 @@ def main():
                          help="Store the credential unrestricted (sendable to any host) — use with care")
     p_store.add_argument("--rotate-after", dest="rotate_after", type=int, default=None,
                          help="Rotation policy in days; the credential is flagged overdue after this long")
+    p_store.add_argument("--allowed-method", dest="allowed_method", action="append", default=[],
+                         help="Restrict to an HTTP method (repeatable, e.g. GET). Default: any")
+    p_store.add_argument("--allowed-path", dest="allowed_path", action="append", default=[],
+                         help="Restrict to a URL path glob (repeatable, e.g. /repos/*). Default: any")
 
     # list
     sub.add_parser("list", help="List stored credentials")
@@ -313,6 +341,14 @@ def main():
     # rotate
     p_rotate = sub.add_parser("rotate", help="Replace the secret for an existing credential")
     p_rotate.add_argument("name", help="Credential name to rotate")
+
+    # scope
+    p_scope = sub.add_parser("scope", help="Set request scope (methods/paths) for an existing credential")
+    p_scope.add_argument("name", help="Credential name")
+    p_scope.add_argument("--allowed-method", dest="allowed_method", action="append", default=[],
+                         help="HTTP method to allow (repeatable)")
+    p_scope.add_argument("--allowed-path", dest="allowed_path", action="append", default=[],
+                         help="URL path glob to allow (repeatable)")
 
     # allow-domain
     p_allow = sub.add_parser("allow-domain", help="Add allowed domain(s) to an existing credential")
@@ -342,6 +378,7 @@ def main():
         "store": cmd_store,
         "list": cmd_list,
         "rotate": cmd_rotate,
+        "scope": cmd_scope,
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,
         "audit": cmd_audit,

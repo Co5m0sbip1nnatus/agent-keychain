@@ -79,3 +79,30 @@ def test_blocked_request_is_audited(tmp_path, monkeypatch, github_credential):
     secure_http_request("test-domain", "https://evil.com")
     events = audit_log.read_events(blocked_only=True)
     assert any(e["host"] == "evil.com" and e["credential"] == "test-domain" for e in events)
+
+
+@pytest.fixture
+def scoped_credential():
+    """A github credential restricted to GET on /repos/*."""
+    vault.store("test-scope", "fake-token", "github",
+                allowed_domains=["github.com"],
+                allowed_methods=["GET"], allowed_paths=["/repos/*"])
+    yield
+    vault.delete("test-scope")
+
+
+def test_scope_blocks_disallowed_method(scoped_credential):
+    result = secure_http_request("test-scope", "https://api.github.com/repos/o/n", method="DELETE")
+    assert "method" in result and "not allowed" in result
+
+
+def test_scope_blocks_disallowed_path(scoped_credential):
+    result = secure_http_request("test-scope", "https://api.github.com/users/me", method="GET")
+    assert "path" in result and "not allowed" in result
+
+
+def test_smuggling_guard_blocks_secret_in_body(github_credential):
+    """A second secret hidden in the request body must be blocked before sending."""
+    leak = "ghp_" + "A" * 36
+    result = secure_http_request("test-domain", "https://api.github.com/x", method="POST", body=leak)
+    assert "blocked" in result and "credential material" in result
