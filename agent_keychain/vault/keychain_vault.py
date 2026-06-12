@@ -42,6 +42,9 @@ class CredentialEntry:
     allowed_paths: list[str] = field(default_factory=list)
     # Optional rate limit: max allowed requests per 60s window. None = no limit.
     rate_limit_per_min: Optional[int] = None
+    # Commands this credential may be injected into via `exec` (basename glob).
+    # Empty means the credential cannot be used with exec at all (deny-by-default).
+    allowed_commands: list[str] = field(default_factory=list)
 
 class KeychainVault:
     """
@@ -75,6 +78,7 @@ class KeychainVault:
                 "allowed_methods": entry.allowed_methods,
                 "allowed_paths": entry.allowed_paths,
                 "rate_limit_per_min": entry.rate_limit_per_min,
+                "allowed_commands": entry.allowed_commands,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -115,11 +119,12 @@ class KeychainVault:
                     allowed_methods=info.get("allowed_methods", []),
                     allowed_paths=info.get("allowed_paths", []),
                     rate_limit_per_min=info.get("rate_limit_per_min"),
+                    allowed_commands=info.get("allowed_commands", []),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None, rate_limit_per_min: Optional[int] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None, rate_limit_per_min: Optional[int] = None, allowed_commands: Optional[list[str]] = None) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
@@ -167,6 +172,7 @@ class KeychainVault:
             allowed_methods=[m.upper() for m in allowed_methods] if allowed_methods else [],
             allowed_paths=list(allowed_paths) if allowed_paths else [],
             rate_limit_per_min=rate_limit_per_min,
+            allowed_commands=list(allowed_commands) if allowed_commands else [],
         )
         self._save_metadata()
 
@@ -271,6 +277,16 @@ class KeychainVault:
         self._save_metadata()
         log.info("Updated request scope for '%s' (methods: %s, paths: %s)", name,
                  ", ".join(entry.allowed_methods) or "any", ", ".join(entry.allowed_paths) or "any")
+        return True
+
+    def set_allowed_commands(self, name: str, allowed_commands: list[str]) -> bool:
+        """Set the exec command allowlist for an existing credential."""
+        entry = self._metadata.get(name)
+        if entry is None:
+            return False
+        entry.allowed_commands = list(allowed_commands)
+        self._save_metadata()
+        log.info("Updated allowed commands for '%s': %s", name, ", ".join(allowed_commands) or "(none)")
         return True
 
     def has(self, name: str) -> bool:

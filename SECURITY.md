@@ -22,10 +22,20 @@ The following are in scope:
 - Bypass of Credential Guard redaction patterns
 - Hook enforcement bypass
 - Secret exposure in logs or error messages
+- Response DLP / smuggling-guard bypass
+
+## Known limitations
+
+- **`exec` is not a sandbox.** The `exec` wrapper injects a secret into a
+  subprocess the agent chose. A credential's command allowlist bounds *which*
+  binaries it can be injected into (deny-by-default), but an allowlisted binary
+  can in principle still be coerced into leaking the secret (e.g. piping an
+  injected env var to an attacker). Treat the allowlist as least-privilege
+  scoping, not containment; pair it with OS-level sandboxing for hard isolation.
 
 ## Supported Versions
 
 | Version | Supported |
 |---------|-----------|
-| 1.8.x   | Yes       |
-| < 1.8   | No        |
+| 1.9.x   | Yes       |
+| < 1.9   | No        |

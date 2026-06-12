@@ -78,6 +78,7 @@ Options:
 --allowed-method GET               # Restrict to HTTP method(s) (repeatable; default: any)
 --allowed-path /repos/*            # Restrict to URL path glob(s) (repeatable; default: any)
 --rate-limit 60                    # Max requests per minute for this credential (default: unlimited)
+--allowed-command aws              # Permit a command for `exec` (repeatable; default: none)
 ```
 
 **Least-privilege request scope.** Domain binding limits *where* a credential goes; scoping limits *what* it can do there. Restrict a credential to specific HTTP methods and URL paths so a tricked agent can't do more than intended — e.g. a read-only GitHub token:
@@ -99,8 +100,18 @@ agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a d
 agent-keychain migrate                                 # Backfill domains for credentials that have none
 agent-keychain audit                                   # Show recent credential-usage events
 agent-keychain scan                                    # Find secrets living outside the vault
+agent-keychain allow-command aws-prod --command aws    # Permit a command for exec
 agent-keychain delete my-token                         # Delete a credential
 ```
+
+**Beyond HTTP: the `exec` wrapper.** Most real workflows authenticate with non-HTTP tools — `git`, `aws`, `gcloud`, `psql`, `docker`. `agent-keychain exec` injects a stored secret into a subprocess's environment (or a `{secret}` argument placeholder) so those tools authenticate without the secret ever entering the agent's context. The command's output is run through response DLP before it's shown.
+
+```bash
+agent-keychain store aws-prod --type aws --allow-any --allowed-command aws
+agent-keychain exec --credential aws-prod --env AWS_SECRET_ACCESS_KEY -- aws s3 ls
+```
+
+A credential can only be injected into commands on its allowlist (empty by default — deny-by-default), so a credential can't be used with `exec` until you permit a specific binary. **Honest limitation:** the agent still chooses the command, so an allowlisted binary could in principle be coerced into leaking. The allowlist bounds *which* tools a credential can touch; it is not a full sandbox (see SECURITY.md).
 
 **Onboarding scan.** Agent Keychain only protects what's in its vault — but most leaks start with secrets already sitting in environment variables and dotfiles. `agent-keychain scan` checks your environment and common credential files (`~/.aws/credentials`, `~/.npmrc`, `.env`, …) and reports what it finds — only the location and credential type, never the secret value — so you can move those secrets into the vault.
 
@@ -194,6 +205,7 @@ agent-keychain/
 │   │   ├── secure_string.py   # Memory scrubbing via ctypes
 │   │   ├── domain_policy.py   # Per-credential allowed-domain matching
 │   │   ├── request_scope.py   # HTTP method + path allowlists
+│   │   ├── command_policy.py  # exec command allowlist matching
 │   │   └── rotation.py        # Rotation age / overdue policy
 │   ├── mcp_server/            # MCP server for AI agent integration
 │   │   └── server.py          # Enforces domain/scope/smuggling/rate-limit
@@ -209,6 +221,7 @@ agent-keychain/
 │   │   └── audit_log.py       # record / rate-limit counts / anomaly summary
 │   ├── logging/               # Structured logging (secrets never logged)
 │   │   └── logger.py
+│   ├── exec_runner.py        # exec wrapper: inject secret into a subprocess
 │   └── cli.py                # Unified CLI entry point
 ├── tests/                     # Unit and integration tests
 ├── poc/                       # Proof of Concept demos
@@ -245,6 +258,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Rotation Policy** | Age tracking + overdue flagging + in-place rotation | Long-lived secrets accumulating exposure |
 | **Audit Log** | Append-only record of every credential use | Undetected misuse / exfiltration attempts |
 | **Rate Limiting** | Per-credential requests-per-minute cap | Rapid bulk use by a compromised agent |
+| **Command Allowlist** | `exec` deny-by-default command binding | A non-HTTP credential being injected into arbitrary commands |
 
 ### Threat Model & Limitations
 

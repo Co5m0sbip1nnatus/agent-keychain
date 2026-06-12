@@ -142,7 +142,7 @@ def cmd_store(args):
     vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
                 ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after,
                 allowed_methods=args.allowed_method, allowed_paths=args.allowed_path,
-                rate_limit_per_min=args.rate_limit)
+                rate_limit_per_min=args.rate_limit, allowed_commands=args.allowed_command)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
     rot_info = f", rotate every {args.rotate_after}d" if args.rotate_after else ""
     print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info}{rot_info})")
@@ -223,6 +223,8 @@ def cmd_list(args):
             print(f"      scope: methods={methods}, paths={paths}")
         if c.rate_limit_per_min:
             print(f"      rate limit: {c.rate_limit_per_min}/min")
+        if c.allowed_commands:
+            print(f"      exec: {', '.join(c.allowed_commands)}")
         rotation = _format_rotation(c, now)
         if rotation:
             print(f"      rotation: {rotation}")
@@ -306,6 +308,57 @@ def cmd_audit(args):
               f"{e.get('method','')} {e.get('host','')}{status_str}{reason_str}")
 
 
+def cmd_exec(args):
+    """Run a command with a stored secret injected, without exposing it."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    from agent_keychain.audit import audit_log
+    from agent_keychain import exec_runner
+
+    vault = KeychainVault()
+    command = args.exec_command
+    # argparse REMAINDER includes a leading "--" when present; drop it.
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        print("Usage: agent-keychain exec --credential <name> --env VAR -- <command...>", file=sys.stderr)
+        sys.exit(2)
+
+    program = os.path.basename(command[0])
+    result = exec_runner.run(vault, args.credential, args.env, command)
+
+    if not result["ok"]:
+        decision = audit_log.BLOCKED if result.get("blocked") else audit_log.ALLOWED
+        audit_log.record(args.credential, f"exec:{program}", "EXEC", decision, result["error"])
+        print(f"Error: {result['error']}", file=sys.stderr)
+        sys.exit(1)
+
+    audit_log.record(args.credential, f"exec:{program}", "EXEC", audit_log.ALLOWED, "ok",
+                     status=result["returncode"], success=(result["returncode"] == 0))
+    if result["redacted"]:
+        print(f"[Response DLP: redacted {', '.join(result['redacted'])} from command output]", file=sys.stderr)
+    if result["stdout"]:
+        sys.stdout.write(result["stdout"])
+    if result["stderr"]:
+        sys.stderr.write(result["stderr"])
+    sys.exit(result["returncode"])
+
+
+def cmd_allow_command(args):
+    """Add allowed exec command(s) to an existing credential."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    vault = KeychainVault()
+    entry = vault.get(args.name)
+    if entry is None:
+        print(f"Credential '{args.name}' not found.", file=sys.stderr)
+        sys.exit(1)
+    existing = list(entry.allowed_commands)
+    for c in args.command:
+        if c not in existing:
+            existing.append(c)
+    vault.set_allowed_commands(args.name, existing)
+    print(f"Updated '{args.name}' allowed commands: {', '.join(existing) or '(none)'}")
+
+
 def cmd_scan(args):
     """Find credentials living outside the vault (env vars + common files)."""
     from agent_keychain.guard.env_scanner import scan_environment
@@ -373,6 +426,8 @@ def main():
                          help="Restrict to a URL path glob (repeatable, e.g. /repos/*). Default: any")
     p_store.add_argument("--rate-limit", dest="rate_limit", type=int, default=None,
                          help="Max requests per minute for this credential (default: unlimited)")
+    p_store.add_argument("--allowed-command", dest="allowed_command", action="append", default=[],
+                         help="Command this credential may be injected into via exec (repeatable, e.g. aws)")
 
     # list
     sub.add_parser("list", help="List stored credentials")
@@ -407,6 +462,20 @@ def main():
     p_audit.add_argument("--suspicious", action="store_true",
                          help="Summarize repeated blocked requests (probing / misuse signal)")
 
+    # exec
+    p_exec = sub.add_parser("exec", help="Run a command with a stored secret injected (never exposed)")
+    p_exec.add_argument("--credential", required=True, help="Credential to inject")
+    p_exec.add_argument("--env", action="append", default=[],
+                        help="Env var to set to the secret in the child (repeatable)")
+    p_exec.add_argument("exec_command", nargs=argparse.REMAINDER, metavar="-- command ...",
+                        help="-- followed by the command to run (use {secret} as an arg placeholder)")
+
+    # allow-command
+    p_allow_cmd = sub.add_parser("allow-command", help="Add allowed exec command(s) to a credential")
+    p_allow_cmd.add_argument("name", help="Credential name")
+    p_allow_cmd.add_argument("--command", action="append", required=True,
+                             help="Command basename to allow (repeatable)")
+
     # scan
     p_scan = sub.add_parser("scan", help="Find credentials living outside the vault (env vars + common files)")
     p_scan.add_argument("--path", action="append", default=[],
@@ -428,6 +497,8 @@ def main():
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,
         "audit": cmd_audit,
+        "exec": cmd_exec,
+        "allow-command": cmd_allow_command,
         "scan": cmd_scan,
         "delete": cmd_delete,
     }
