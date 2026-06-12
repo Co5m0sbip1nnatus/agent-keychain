@@ -1,5 +1,5 @@
 """Tests for the domain binding policy."""
-from src.vault.domain_policy import (
+from agent_keychain.vault.domain_policy import (
     infer_domains,
     host_allowed,
     extract_host,

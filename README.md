@@ -26,10 +26,10 @@ Agent                    Agent Keychain                  External API
 
 ## Components
 
-- **Vault** (`src/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
-- **MCP Server** (`src/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
-- **Credential Guard** (`src/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
-- **Process Isolation** (`src/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
+- **Vault** (`agent_keychain/vault/`) — OS-native keychain-backed credential store (macOS Keychain / Linux SecretService). Secrets are encrypted at rest by the OS. Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
+- **MCP Server** (`agent_keychain/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
+- **Credential Guard** (`agent_keychain/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
+- **Process Isolation** (`agent_keychain/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
 
 ## Quick Start
 
@@ -103,7 +103,7 @@ Create a `.mcp.json` in the project root:
   "mcpServers": {
     "agent-keychain": {
       "command": "./venv/bin/python",
-      "args": ["-m", "src.mcp_server.server"]
+      "args": ["-m", "agent_keychain.mcp_server.server"]
     }
   }
 }
@@ -151,7 +151,7 @@ docker run --rm -e ANTHROPIC_API_KEY agent-keychain-poc \
 
 ```
 agent-keychain/
-├── src/
+├── agent_keychain/
 │   ├── vault/                 # OS keychain-backed credential store
 │   │   ├── keychain_vault.py
 │   │   └── secure_string.py  # Memory scrubbing via ctypes

@@ -8,7 +8,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.vault.keychain_vault import KeychainVault
+from agent_keychain.vault.keychain_vault import KeychainVault
 
 CRED_NAME = "poc-isolation-test"
 
@@ -46,7 +46,7 @@ def without_isolation():
 
 def with_isolation():
     """Credential handled in a short-lived subprocess — memory released on exit."""
-    from src.proxy.process_pool import run_isolated_request
+    from agent_keychain.proxy.process_pool import run_isolated_request
     import json
 
     print("=" * 60)

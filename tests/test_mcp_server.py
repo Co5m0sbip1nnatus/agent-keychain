@@ -1,6 +1,13 @@
 """Tests for MCP server tool functions."""
 import pytest
-from src.mcp_server.server import vault, check_connection, list_available_credentials, secure_http_request
+from agent_keychain.mcp_server.server import vault, check_connection, list_available_credentials, secure_http_request
+
+
+@pytest.fixture(autouse=True)
+def isolate_audit_log(tmp_path, monkeypatch):
+    """Keep test requests from writing to the real audit log."""
+    monkeypatch.setenv("AGENT_KEYCHAIN_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+
 
 @pytest.fixture
 def setup_credential():
@@ -67,7 +74,7 @@ def test_domain_binding_blocks_when_no_domains():
 
 def test_blocked_request_is_audited(tmp_path, monkeypatch, github_credential):
     """A blocked request must leave a 'blocked' entry in the audit log."""
-    from src.audit import audit_log
+    from agent_keychain.audit import audit_log
     monkeypatch.setenv("AGENT_KEYCHAIN_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
     secure_http_request("test-domain", "https://evil.com")
     events = audit_log.read_events(blocked_only=True)

@@ -7,24 +7,56 @@ name = "agent-keychain"
 version = "1.3.0"
 description = "A credential isolation framework for AI coding agents"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+authors = [
+    { name = "Jeehoo Hwang" },
+]
+keywords = [
+    "security",
+    "credentials",
+    "secrets",
+    "ai-agents",
+    "mcp",
+    "claude",
+    "keychain",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
 dependencies = [
     "keyring>=25.0.0",
     "mcp>=1.0.0",
     "rich>=13.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Co5m0sbip1nnatus/agent-keychain"
+Repository = "https://github.com/Co5m0sbip1nnatus/agent-keychain"
+Issues = "https://github.com/Co5m0sbip1nnatus/agent-keychain/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 
 [project.scripts]
-agent-keychain = "src.cli:main"
+agent-keychain = "agent_keychain.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["src*"]
+include = ["agent_keychain*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.sh"]

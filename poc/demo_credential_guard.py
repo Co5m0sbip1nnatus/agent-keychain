@@ -25,7 +25,7 @@ def without_guard():
 
 def with_guard():
     """Read through Credential Guard — credentials automatically redacted."""
-    from src.guard.credential_guard import redact
+    from agent_keychain.guard.credential_guard import redact
 
     print("=" * 60)
     print("  WITH Credential Guard")

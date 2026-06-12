@@ -2,7 +2,7 @@
 import json
 import os
 import pytest
-from src.audit import audit_log
+from agent_keychain.audit import audit_log
 
 
 @pytest.fixture

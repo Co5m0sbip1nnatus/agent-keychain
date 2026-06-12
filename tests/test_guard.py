@@ -1,6 +1,6 @@
 """Tests for Credential Guard redaction and scanning."""
 import pytest
-from src.guard.credential_guard import redact, scan
+from agent_keychain.guard.credential_guard import redact, scan
 
 
 def test_redact_github_token():

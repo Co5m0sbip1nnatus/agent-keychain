@@ -40,7 +40,7 @@ def without_scrubbing():
 
 def with_scrubbing():
     """Use SecureString — credential is zeroed after use."""
-    from src.vault.secure_string import SecureString
+    from agent_keychain.vault.secure_string import SecureString
 
     print("=" * 60)
     print("  WITH Memory Scrubbing (SecureString)")

@@ -109,7 +109,7 @@ def _resolve_store_domains(args):
 
     Returns the resolved domain list (may be ["*"] for unrestricted).
     """
-    from src.vault.domain_policy import infer_domains, WILDCARD
+    from agent_keychain.vault.domain_policy import infer_domains, WILDCARD
 
     if args.allowed_domain:
         return list(args.allowed_domain)
@@ -135,7 +135,7 @@ def _resolve_store_domains(args):
 
 def cmd_store(args):
     """Store a credential in the OS keychain."""
-    from src.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.keychain_vault import KeychainVault
     domains = _resolve_store_domains(args)
     vault = KeychainVault()
     secret = getpass.getpass("Secret: ")
@@ -156,7 +156,7 @@ def _format_domains(allowed_domains):
 
 def cmd_list(args):
     """List all stored credentials."""
-    from src.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     creds = vault.list_credentials()
     if not creds:
@@ -170,7 +170,7 @@ def cmd_list(args):
 
 def cmd_allow_domain(args):
     """Add one or more allowed domains to an existing credential."""
-    from src.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     entry = vault.get(args.name)
     if entry is None:
@@ -186,8 +186,8 @@ def cmd_allow_domain(args):
 
 def cmd_migrate(args):
     """Backfill allowed domains for credentials that have none, using their type."""
-    from src.vault.keychain_vault import KeychainVault
-    from src.vault.domain_policy import infer_domains
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.domain_policy import infer_domains
     vault = KeychainVault()
     backfilled, unmapped = [], []
     for c in vault.list_credentials():
@@ -215,7 +215,7 @@ def cmd_migrate(args):
 
 def cmd_audit(args):
     """Show recent credential-usage audit events."""
-    from src.audit import audit_log
+    from agent_keychain.audit import audit_log
     events = audit_log.read_events(
         limit=args.limit,
         credential=args.credential,
@@ -236,7 +236,7 @@ def cmd_audit(args):
 
 def cmd_delete(args):
     """Delete a credential from the OS keychain."""
-    from src.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.keychain_vault import KeychainVault
     vault = KeychainVault()
     if vault.delete(args.name):
         print(f"Deleted '{args.name}'")

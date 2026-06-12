@@ -26,8 +26,8 @@ import urllib.error
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _project_root)
 
-from src.vault.keychain_vault import KeychainVault
-from src.vault.domain_policy import host_allowed, extract_host
+from agent_keychain.vault.keychain_vault import KeychainVault
+from agent_keychain.vault.domain_policy import host_allowed, extract_host
 
 
 def _build_auth_header(auth_type: str, secret: str) -> tuple[str, str]:

@@ -6,6 +6,10 @@ venv/
 .venv/
 *.egg-info/
 
+# Build artifacts
+dist/
+build/
+
 # Never commit real credentials
 .env.local
 .env.real

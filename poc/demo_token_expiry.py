@@ -9,7 +9,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.vault.keychain_vault import KeychainVault
+from agent_keychain.vault.keychain_vault import KeychainVault
 
 CRED_NAME = "poc-expiry-test"
 

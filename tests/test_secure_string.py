@@ -1,6 +1,6 @@
 """Tests for secure memory scrubbing (SecureString and secure_zero)."""
 import pytest
-from src.vault.secure_string import secure_zero, SecureString
+from agent_keychain.vault.secure_string import secure_zero, SecureString
 
 
 class TestSecureZero:

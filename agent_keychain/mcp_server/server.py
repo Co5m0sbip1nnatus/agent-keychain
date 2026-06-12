@@ -8,12 +8,12 @@ from mcp.server.fastmcp import FastMCP
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from src.vault.keychain_vault import KeychainVault
-from src.vault.domain_policy import host_allowed, extract_host
-from src.guard.credential_guard import redact, scan
-from src.proxy.process_pool import run_isolated_request
-from src.audit import audit_log
-from src.logging.logger import get_logger
+from agent_keychain.vault.keychain_vault import KeychainVault
+from agent_keychain.vault.domain_policy import host_allowed, extract_host
+from agent_keychain.guard.credential_guard import redact, scan
+from agent_keychain.proxy.process_pool import run_isolated_request
+from agent_keychain.audit import audit_log
+from agent_keychain.logging.logger import get_logger
 
 log = get_logger("mcp")
 vault = KeychainVault()

@@ -9,7 +9,7 @@ and exits -- releasing all memory.
 
 Usage from the MCP server:
 
-    from src.proxy.process_pool import run_isolated_request
+    from agent_keychain.proxy.process_pool import run_isolated_request
 
     result = run_isolated_request(
         credential_name="github-token",
@@ -24,7 +24,7 @@ import subprocess
 import sys
 from typing import Optional
 
-from src.logging.logger import get_logger
+from agent_keychain.logging.logger import get_logger
 
 log = get_logger("process_pool")
 

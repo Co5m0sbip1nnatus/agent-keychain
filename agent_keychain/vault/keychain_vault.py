@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import keyring.errors
-from src.logging.logger import get_logger
-from src.vault.secure_string import SecureString
+from agent_keychain.logging.logger import get_logger
+from agent_keychain.vault.secure_string import SecureString
 
 log = get_logger("vault")
 

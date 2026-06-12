@@ -1,7 +1,7 @@
 """Tests for KeychainVault credential operations."""
 import pytest
-from src.vault.keychain_vault import KeychainVault
-from src.vault.secure_string import SecureString
+from agent_keychain.vault.keychain_vault import KeychainVault
+from agent_keychain.vault.secure_string import SecureString
 
 @pytest.fixture
 def vault():
