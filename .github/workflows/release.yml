@@ -1,26 +1,41 @@
 name: Release to PyPI
 
-# Publishes the package to PyPI when a version tag (e.g. v1.3.0) is pushed.
+# MANUAL ONLY. This workflow never runs automatically — it must be started by
+# hand from the Actions tab ("Run workflow"). This prevents an ordinary tag
+# push from accidentally attempting a publish.
 #
 # Uses PyPI Trusted Publishing (OIDC) — no API token is stored in the repo.
-# Before the first release, configure a trusted publisher on PyPI:
-#   PyPI -> your project -> Publishing -> Add a GitHub publisher
-#     Owner:        Co5m0sbip1nnatus
-#     Repository:   agent-keychain
-#     Workflow:     release.yml
-#     Environment:  pypi
-# (The project name `agent-keychain` must be registered/owned by your account.)
+# Before the FIRST publish:
+#   1. Create a PyPI account and reserve the project name `agent-keychain`.
+#   2. PyPI -> your project -> Publishing -> Add a GitHub publisher:
+#        Owner:        Co5m0sbip1nnatus
+#        Repository:   agent-keychain
+#        Workflow:     release.yml
+#        Environment:  pypi
+#   3. Then run this workflow manually, optionally entering the tag to release.
+#
+# (To switch back to automatic tag-triggered releases later, replace the
+#  `workflow_dispatch` block below with:
+#     on:
+#       push:
+#         tags: ["v*"]
+#  Only do this once trusted publishing above is configured.)
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (tag or branch) to build and publish"
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
