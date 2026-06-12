@@ -57,6 +57,20 @@ def scan(content: str) -> list[dict]:
     return findings
 
 
+def find_secrets(content: str) -> list[tuple[str, str]]:
+    """Return (type, matched_value) pairs for credentials found in content.
+
+    Unlike scan()/redact(), this exposes the actual matched strings — it exists
+    only for the local `import` flow, which needs the value to move a secret
+    into the vault. Never send its output anywhere.
+    """
+    results: list[tuple[str, str]] = []
+    for name, pattern in CREDENTIAL_PATTERNS:
+        for match in pattern.finditer(content):
+            results.append((name, match.group(0)))
+    return results
+
+
 def scrub_response(body: str, injected_secret: str = "") -> tuple[str, list[str]]:
     """Make an HTTP response body safe to hand back to the agent.
 

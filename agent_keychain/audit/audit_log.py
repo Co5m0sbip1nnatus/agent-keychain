@@ -58,6 +58,11 @@ def record(
         "decision": decision,
         "reason": reason,
     }
+    # Optional actor label: set AGENT_KEYCHAIN_ACTOR on the server/CLI process
+    # to record which agent/deployment a request came from.
+    actor = os.environ.get("AGENT_KEYCHAIN_ACTOR", "")
+    if actor:
+        event["actor"] = actor
     if status is not None:
         event["status"] = status
     if success is not None:

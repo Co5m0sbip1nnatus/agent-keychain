@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -304,7 +305,9 @@ def cmd_audit(args):
         status_str = f" [{status}]" if status is not None else ""
         reason = e.get("reason", "")
         reason_str = f" — {reason}" if reason else ""
-        print(f"  {e.get('ts','')}  {mark:7}  {e.get('credential','')} "
+        actor = e.get("actor", "")
+        actor_str = f" <{actor}>" if actor else ""
+        print(f"  {e.get('ts','')}  {mark:7}  {e.get('credential','')}{actor_str} "
               f"{e.get('method','')} {e.get('host','')}{status_str}{reason_str}")
 
 
@@ -357,6 +360,82 @@ def cmd_allow_command(args):
             existing.append(c)
     vault.set_allowed_commands(args.name, existing)
     print(f"Updated '{args.name}' allowed commands: {', '.join(existing) or '(none)'}")
+
+
+def _sanitize_name(key: str, prefix: str = "") -> str:
+    name = re.sub(r"[^A-Za-z0-9]+", "-", key.strip().lower()).strip("-")
+    return f"{prefix}{name}" if prefix else name
+
+
+def cmd_import(args):
+    """Import secrets from a KEY=value file into the vault (and optionally scrub it)."""
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault.domain_policy import infer_domains, WILDCARD
+    from agent_keychain.onboarding import parse_secret_lines, scrub_file
+
+    path = os.path.abspath(os.path.expanduser(args.from_file))
+    if not os.path.isfile(path):
+        print(f"Error: file '{args.from_file}' not found.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(path, "r", errors="replace") as f:
+        found = parse_secret_lines(f.read())
+    if not found:
+        print(f"No KEY=value secrets found in {path}.")
+        return
+
+    vault = KeychainVault()
+    imported, values = [], []
+    for item in found:
+        name = _sanitize_name(item["key"], args.prefix)
+        service = args.type or item["service"] or "imported"
+        if args.allowed_domain:
+            domains = list(args.allowed_domain)
+        elif args.allow_any:
+            domains = [WILDCARD]
+        else:
+            domains = infer_domains(service)
+        vault.store(name, item["value"], service, allowed_domains=domains)
+        imported.append((name, service, domains))
+        values.append(item["value"])
+
+    print(f"Imported {len(imported)} secret(s) into the vault:")
+    for name, service, domains in imported:
+        dom = ", ".join(domains) if domains else "NO DOMAINS (blocked) ⚠ — set with allow-domain"
+        print(f"  {name} ({service}) -> {dom}")
+
+    if args.scrub:
+        backup = scrub_file(path, values)
+        print(f"\nScrubbed the secrets from {path} (backup: {backup}).")
+    else:
+        print("\nThe original file still contains the secrets. Re-run with --scrub to remove them.")
+
+
+def cmd_register_mcp(args):
+    """Register the Agent Keychain MCP server for Claude Code or Cursor."""
+    server_cmd = sys.executable
+    server_args = ["-m", "agent_keychain.mcp_server.server"]
+    entry = {"command": server_cmd, "args": server_args}
+
+    if args.cursor:
+        target = os.path.join(os.getcwd(), ".cursor", "mcp.json")
+    else:
+        target = os.path.join(os.getcwd(), ".mcp.json")
+
+    os.makedirs(os.path.dirname(target), exist_ok=True) if os.path.dirname(target) else None
+    config = {}
+    if os.path.isfile(target):
+        try:
+            with open(target) as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+    config.setdefault("mcpServers", {})["agent-keychain"] = entry
+    with open(target, "w") as f:
+        json.dump(config, f, indent=2)
+    client = "Cursor" if args.cursor else "Claude Code"
+    print(f"Registered Agent Keychain MCP server for {client} in {target}.")
+    print("Restart the client to load it.")
 
 
 def cmd_scan(args):
@@ -476,6 +555,20 @@ def main():
     p_allow_cmd.add_argument("--command", action="append", required=True,
                              help="Command basename to allow (repeatable)")
 
+    # import
+    p_import = sub.add_parser("import", help="Import secrets from a KEY=value file into the vault")
+    p_import.add_argument("--from-file", dest="from_file", required=True, help="File to import from (.env, credentials, ...)")
+    p_import.add_argument("--type", default="", dest="type", help="Service type override for imported secrets")
+    p_import.add_argument("--allowed-domain", dest="allowed_domain", action="append", default=[],
+                          help="Bind imported secrets to a domain (repeatable)")
+    p_import.add_argument("--allow-any", dest="allow_any", action="store_true", help="Import unrestricted")
+    p_import.add_argument("--prefix", default="", help="Name prefix for imported credentials")
+    p_import.add_argument("--scrub", action="store_true", help="Remove the secrets from the source file (keeps a .bak)")
+
+    # register-mcp
+    p_reg = sub.add_parser("register-mcp", help="Register the MCP server for Claude Code (or Cursor)")
+    p_reg.add_argument("--cursor", action="store_true", help="Write Cursor config (.cursor/mcp.json) instead of .mcp.json")
+
     # scan
     p_scan = sub.add_parser("scan", help="Find credentials living outside the vault (env vars + common files)")
     p_scan.add_argument("--path", action="append", default=[],
@@ -499,6 +592,8 @@ def main():
         "audit": cmd_audit,
         "exec": cmd_exec,
         "allow-command": cmd_allow_command,
+        "import": cmd_import,
+        "register-mcp": cmd_register_mcp,
         "scan": cmd_scan,
         "delete": cmd_delete,
     }

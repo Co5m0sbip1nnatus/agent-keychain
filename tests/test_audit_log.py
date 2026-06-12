@@ -28,7 +28,7 @@ def test_record_appends_jsonl(audit_file):
 def test_record_never_logs_secrets(audit_file):
     # The audit event must only contain the documented metadata fields.
     event = audit_log.record("c", "h", "GET", audit_log.ALLOWED)
-    assert set(event.keys()) <= {"ts", "credential", "host", "method", "decision", "reason", "status", "success"}
+    assert set(event.keys()) <= {"ts", "credential", "host", "method", "decision", "reason", "status", "success", "actor"}
 
 
 def test_file_permissions_owner_only(audit_file):

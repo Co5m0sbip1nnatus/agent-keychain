@@ -113,7 +113,16 @@ agent-keychain exec --credential aws-prod --env AWS_SECRET_ACCESS_KEY -- aws s3 
 
 A credential can only be injected into commands on its allowlist (empty by default — deny-by-default), so a credential can't be used with `exec` until you permit a specific binary. **Honest limitation:** the agent still chooses the command, so an allowlisted binary could in principle be coerced into leaking. The allowlist bounds *which* tools a credential can touch; it is not a full sandbox (see SECURITY.md).
 
-**Onboarding scan.** Agent Keychain only protects what's in its vault — but most leaks start with secrets already sitting in environment variables and dotfiles. `agent-keychain scan` checks your environment and common credential files (`~/.aws/credentials`, `~/.npmrc`, `.env`, …) and reports what it finds — only the location and credential type, never the secret value — so you can move those secrets into the vault.
+**Onboarding scan + import.** Agent Keychain only protects what's in its vault — but most leaks start with secrets already sitting in environment variables and dotfiles. `agent-keychain scan` checks your environment and common credential files and reports what it finds — only the location and credential type, never the secret value. Then `agent-keychain import` moves them in and (with `--scrub`) removes them from the source, keeping a `.bak`:
+
+```bash
+agent-keychain scan                                    # what's exposed?
+agent-keychain import --from-file app-config --scrub   # move secrets into the vault, scrub the file
+```
+
+**MCP registration.** `agent-keychain register-mcp` writes the project `.mcp.json` (or `.cursor/mcp.json` with `--cursor`) so the client picks up the server without hand-editing config.
+
+**Audit actor.** Set `AGENT_KEYCHAIN_ACTOR` on the server/CLI process to label which agent or deployment a request came from; it's recorded with each audit event.
 
 **Rotation.** Long-lived secrets are a liability — the longer a token stays valid, the longer a leaked copy is useful. Set a rotation policy with `--rotate-after <days>` when storing; `agent-keychain list` then shows each credential's age and flags any that are overdue (`ROTATION DUE ⚠`). When it's time, `agent-keychain rotate <name>` prompts for the new secret and swaps it in place, preserving the credential's domains, auth type, and other metadata.
 
