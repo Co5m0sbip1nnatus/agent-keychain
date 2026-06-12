@@ -130,6 +130,17 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
             f"({kinds}) in the URL or body. Secrets must not be sent through this proxy."
         )
 
+    # Enforce a per-credential rate limit (requests per 60s), if set.
+    if entry.rate_limit_per_min:
+        recent = audit_log.count_recent(credential_name, 60, decision=audit_log.ALLOWED)
+        if recent >= entry.rate_limit_per_min:
+            audit_log.record(credential_name, host, method, audit_log.BLOCKED, "rate limit exceeded")
+            log.warning("Blocked request: credential '%s' over rate limit (%d/min)", credential_name, entry.rate_limit_per_min)
+            return (
+                f"Error: credential '{credential_name}' has exceeded its rate limit "
+                f"of {entry.rate_limit_per_min} requests/min. Try again shortly."
+            )
+
     auth_type = entry.auth_type
 
     # Run the HTTP request in an isolated subprocess.

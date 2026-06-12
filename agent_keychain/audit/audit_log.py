@@ -17,9 +17,11 @@ The path can be overridden with the AGENT_KEYCHAIN_AUDIT_LOG env var (used by
 tests and for routing to a central location).
 """
 
+import calendar
 import json
 import os
 import time
+from collections import Counter
 from typing import Optional
 
 AUDIT_DIR = os.path.expanduser("~/.agent-keychain")
@@ -102,3 +104,53 @@ def read_events(
             events.append(event)
 
     return events[-limit:] if limit and limit > 0 else events
+
+
+def _parse_ts(ts: str) -> Optional[float]:
+    """Parse an audit event's ISO-UTC timestamp into epoch seconds."""
+    try:
+        return calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
+    except (ValueError, TypeError):
+        return None
+
+
+def count_recent(credential: str, window_seconds: int, decision: str = ALLOWED, now: Optional[float] = None) -> int:
+    """Count this credential's events with the given decision in the last window.
+
+    Used by the rate limiter. Best-effort: events with unparseable timestamps
+    are skipped.
+    """
+    if now is None:
+        now = time.time()
+    cutoff = now - window_seconds
+    count = 0
+    for event in read_events(limit=0, credential=credential):
+        if event.get("decision") != decision:
+            continue
+        ts = _parse_ts(event.get("ts", ""))
+        if ts is not None and ts >= cutoff:
+            count += 1
+    return count
+
+
+def summarize_blocked(min_count: int = 1) -> list[dict]:
+    """Group blocked events by (credential, reason) for anomaly review.
+
+    Returns a list of {"credential", "reason", "count", "hosts"} sorted by
+    count (descending), filtered to groups with at least ``min_count`` hits.
+    Repeated blocks are a signal of probing or misuse.
+    """
+    counts: Counter = Counter()
+    hosts: dict = {}
+    for event in read_events(limit=0, blocked_only=True):
+        key = (event.get("credential", ""), event.get("reason", ""))
+        counts[key] += 1
+        hosts.setdefault(key, set()).add(event.get("host", ""))
+
+    summary = [
+        {"credential": cred, "reason": reason, "count": n, "hosts": sorted(h for h in hosts[(cred, reason)] if h)}
+        for (cred, reason), n in counts.items()
+        if n >= min_count
+    ]
+    summary.sort(key=lambda r: r["count"], reverse=True)
+    return summary

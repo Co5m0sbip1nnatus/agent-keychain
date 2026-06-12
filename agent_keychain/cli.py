@@ -141,7 +141,8 @@ def cmd_store(args):
     secret = getpass.getpass("Secret: ")
     vault.store(args.name, secret, args.service_type, args.description, args.auth_type,
                 ttl=args.ttl, allowed_domains=domains, rotate_after_days=args.rotate_after,
-                allowed_methods=args.allowed_method, allowed_paths=args.allowed_path)
+                allowed_methods=args.allowed_method, allowed_paths=args.allowed_path,
+                rate_limit_per_min=args.rate_limit)
     ttl_info = f", ttl: {args.ttl}s" if args.ttl else ""
     rot_info = f", rotate every {args.rotate_after}d" if args.rotate_after else ""
     print(f"Stored '{args.name}' ({args.service_type}, auth: {args.auth_type}{ttl_info}{rot_info})")
@@ -220,6 +221,8 @@ def cmd_list(args):
             methods = ", ".join(c.allowed_methods) if c.allowed_methods else "any"
             paths = ", ".join(c.allowed_paths) if c.allowed_paths else "any"
             print(f"      scope: methods={methods}, paths={paths}")
+        if c.rate_limit_per_min:
+            print(f"      rate limit: {c.rate_limit_per_min}/min")
         rotation = _format_rotation(c, now)
         if rotation:
             print(f"      rotation: {rotation}")
@@ -273,6 +276,18 @@ def cmd_migrate(args):
 def cmd_audit(args):
     """Show recent credential-usage audit events."""
     from agent_keychain.audit import audit_log
+
+    if args.suspicious:
+        groups = audit_log.summarize_blocked(min_count=2)
+        if not groups:
+            print("No repeated blocked requests detected.")
+            return
+        print("Repeated blocked requests (possible probing / misuse):")
+        for g in groups:
+            hosts = f" — hosts: {', '.join(g['hosts'])}" if g["hosts"] else ""
+            print(f"  {g['count']:>4}x  {g['credential']}  [{g['reason']}]{hosts}")
+        return
+
     events = audit_log.read_events(
         limit=args.limit,
         credential=args.credential,
@@ -334,6 +349,8 @@ def main():
                          help="Restrict to an HTTP method (repeatable, e.g. GET). Default: any")
     p_store.add_argument("--allowed-path", dest="allowed_path", action="append", default=[],
                          help="Restrict to a URL path glob (repeatable, e.g. /repos/*). Default: any")
+    p_store.add_argument("--rate-limit", dest="rate_limit", type=int, default=None,
+                         help="Max requests per minute for this credential (default: unlimited)")
 
     # list
     sub.add_parser("list", help="List stored credentials")
@@ -365,6 +382,8 @@ def main():
     p_audit.add_argument("--credential", default=None, help="Filter by credential name")
     p_audit.add_argument("--blocked-only", dest="blocked_only", action="store_true",
                          help="Show only blocked (denied) requests")
+    p_audit.add_argument("--suspicious", action="store_true",
+                         help="Summarize repeated blocked requests (probing / misuse signal)")
 
     # delete
     p_delete = sub.add_parser("delete", help="Delete a credential")

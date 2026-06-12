@@ -106,3 +106,18 @@ def test_smuggling_guard_blocks_secret_in_body(github_credential):
     leak = "ghp_" + "A" * 36
     result = secure_http_request("test-domain", "https://api.github.com/x", method="POST", body=leak)
     assert "blocked" in result and "credential material" in result
+
+
+def test_rate_limit_blocks_over_limit():
+    """Once a credential hits its per-minute limit, further requests are blocked
+    before any network call (verified by pre-seeding the audit log)."""
+    from agent_keychain.audit import audit_log
+    vault.store("test-rl", "fake-token", "github", allowed_domains=["github.com"], rate_limit_per_min=2)
+    try:
+        # Pre-seed two allowed events within the window so the limit is reached.
+        audit_log.record("test-rl", "api.github.com", "GET", audit_log.ALLOWED, "ok", status=200, success=True)
+        audit_log.record("test-rl", "api.github.com", "GET", audit_log.ALLOWED, "ok", status=200, success=True)
+        result = secure_http_request("test-rl", "https://api.github.com/x", method="GET")
+        assert "rate limit" in result
+    finally:
+        vault.delete("test-rl")

@@ -40,6 +40,8 @@ class CredentialEntry:
     # of URL path globs (e.g. "/repos/*"). Enforced at request time.
     allowed_methods: list[str] = field(default_factory=list)
     allowed_paths: list[str] = field(default_factory=list)
+    # Optional rate limit: max allowed requests per 60s window. None = no limit.
+    rate_limit_per_min: Optional[int] = None
 
 class KeychainVault:
     """
@@ -72,6 +74,7 @@ class KeychainVault:
                 "rotation_count": entry.rotation_count,
                 "allowed_methods": entry.allowed_methods,
                 "allowed_paths": entry.allowed_paths,
+                "rate_limit_per_min": entry.rate_limit_per_min,
             }
         keyring.set_password(
             self.SERVICE_NAME,
@@ -100,11 +103,12 @@ class KeychainVault:
                     rotation_count=info.get("rotation_count", 0),
                     allowed_methods=info.get("allowed_methods", []),
                     allowed_paths=info.get("allowed_paths", []),
+                    rate_limit_per_min=info.get("rate_limit_per_min"),
                 )
         except (json.JSONDecodeError, KeyError):
             pass
     
-    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None) -> None:
+    def store(self, name: str, secret: str, service_type: str, description: str = "", auth_type: str = "bearer", ttl: Optional[int] = None, allowed_domains: Optional[list[str]] = None, rotate_after_days: Optional[int] = None, allowed_methods: Optional[list[str]] = None, allowed_paths: Optional[list[str]] = None, rate_limit_per_min: Optional[int] = None) -> None:
         """Store a credential. The secret is encrypted by the OS keychain.
 
         Args:
@@ -151,6 +155,7 @@ class KeychainVault:
             rotation_count=0,
             allowed_methods=[m.upper() for m in allowed_methods] if allowed_methods else [],
             allowed_paths=list(allowed_paths) if allowed_paths else [],
+            rate_limit_per_min=rate_limit_per_min,
         )
         self._save_metadata()
 

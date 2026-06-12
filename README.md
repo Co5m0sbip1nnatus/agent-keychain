@@ -77,6 +77,7 @@ Options:
 --rotate-after 90                  # Rotation policy in days; flagged overdue once exceeded
 --allowed-method GET               # Restrict to HTTP method(s) (repeatable; default: any)
 --allowed-path /repos/*            # Restrict to URL path glob(s) (repeatable; default: any)
+--rate-limit 60                    # Max requests per minute for this credential (default: unlimited)
 ```
 
 **Least-privilege request scope.** Domain binding limits *where* a credential goes; scoping limits *what* it can do there. Restrict a credential to specific HTTP methods and URL paths so a tricked agent can't do more than intended — e.g. a read-only GitHub token:
@@ -108,7 +109,10 @@ agent-keychain delete my-token                         # Delete a credential
 agent-keychain audit                       # last 20 events
 agent-keychain audit --blocked-only        # only denied requests (spot probing / misuse)
 agent-keychain audit --credential my-token # filter by credential
+agent-keychain audit --suspicious          # group repeated blocks — a probing/misuse signal
 ```
+
+**Rate limiting.** Cap how often a credential can be used with `store --rate-limit <n>` (requests per minute). Once the limit is hit, further requests are blocked (and audited) until the window clears — bounding how fast a compromised agent can use a token.
 
 ### 4. Use as MCP Server (with Claude Code)
 
@@ -216,6 +220,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |
 | **Rotation Policy** | Age tracking + overdue flagging + in-place rotation | Long-lived secrets accumulating exposure |
 | **Audit Log** | Append-only record of every credential use | Undetected misuse / exfiltration attempts |
+| **Rate Limiting** | Per-credential requests-per-minute cap | Rapid bulk use by a compromised agent |
 
 ### Threat Model & Limitations
 
