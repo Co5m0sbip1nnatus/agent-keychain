@@ -213,6 +213,27 @@ def cmd_migrate(args):
         print("Nothing to migrate — all credentials already have domains.")
 
 
+def cmd_audit(args):
+    """Show recent credential-usage audit events."""
+    from src.audit import audit_log
+    events = audit_log.read_events(
+        limit=args.limit,
+        credential=args.credential,
+        blocked_only=args.blocked_only,
+    )
+    if not events:
+        print("No audit events recorded.")
+        return
+    for e in events:
+        mark = "BLOCKED" if e.get("decision") == audit_log.BLOCKED else "allowed"
+        status = e.get("status")
+        status_str = f" [{status}]" if status is not None else ""
+        reason = e.get("reason", "")
+        reason_str = f" — {reason}" if reason else ""
+        print(f"  {e.get('ts','')}  {mark:7}  {e.get('credential','')} "
+              f"{e.get('method','')} {e.get('host','')}{status_str}{reason_str}")
+
+
 def cmd_delete(args):
     """Delete a credential from the OS keychain."""
     from src.vault.keychain_vault import KeychainVault
@@ -263,6 +284,13 @@ def main():
     # migrate
     sub.add_parser("migrate", help="Backfill allowed domains for credentials that have none")
 
+    # audit
+    p_audit = sub.add_parser("audit", help="Show recent credential-usage audit events")
+    p_audit.add_argument("--limit", type=int, default=20, help="Max events to show (default: 20)")
+    p_audit.add_argument("--credential", default=None, help="Filter by credential name")
+    p_audit.add_argument("--blocked-only", dest="blocked_only", action="store_true",
+                         help="Show only blocked (denied) requests")
+
     # delete
     p_delete = sub.add_parser("delete", help="Delete a credential")
     p_delete.add_argument("name", help="Credential name to delete")
@@ -276,6 +304,7 @@ def main():
         "list": cmd_list,
         "allow-domain": cmd_allow_domain,
         "migrate": cmd_migrate,
+        "audit": cmd_audit,
         "delete": cmd_delete,
     }
 

@@ -12,6 +12,7 @@ from src.vault.keychain_vault import KeychainVault
 from src.vault.domain_policy import host_allowed, extract_host
 from src.guard.credential_guard import redact, scan
 from src.proxy.process_pool import run_isolated_request
+from src.audit import audit_log
 from src.logging.logger import get_logger
 
 log = get_logger("mcp")
@@ -65,20 +66,26 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
     method = method.upper()
     if method not in allowed_methods:
         return f"Error: Method must be one of {', '.join(sorted(allowed_methods))}"
-    
+
+    # Parse the destination host up front so it can be audited even on rejection.
+    host = extract_host(url)
+
     # Check credential exists before spawning subprocess
     entry = vault.get(credential_name)
     if entry is None:
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, "credential not found")
         return f"Error: Credential '{credential_name}' not found. Use list_available_credentials to see available options."
+
+    if not host:
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, "unparseable url")
+        return f"Error: Could not parse a hostname from '{url}'."
 
     # Enforce domain binding: a credential may only be used against the
     # domains it is bound to. This prevents a prompt-injected agent from
     # exfiltrating the token by pointing the request at an arbitrary host.
-    host = extract_host(url)
-    if not host:
-        return f"Error: Could not parse a hostname from '{url}'."
     if not host_allowed(host, entry.allowed_domains):
         if not entry.allowed_domains:
+            audit_log.record(credential_name, host, method, audit_log.BLOCKED, "no allowed domains")
             log.warning("Blocked request: credential '%s' has no allowed domains (host: %s)", credential_name, host)
             return (
                 f"Error: credential '{credential_name}' has no allowed domains, "
@@ -86,6 +93,7 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
                 f"Run: agent-keychain migrate  (to backfill from service type)  or  "
                 f"agent-keychain allow-domain {credential_name} --allowed-domain {host}"
             )
+        audit_log.record(credential_name, host, method, audit_log.BLOCKED, "host not in allowed domains")
         log.warning("Blocked request: credential '%s' not allowed to call '%s' (allowed: %s)", credential_name, host, ", ".join(entry.allowed_domains))
         return (
             f"Error: credential '{credential_name}' is not allowed to call '{host}'. "
@@ -109,8 +117,12 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
     result = json.loads(raw)
 
     if result.get("success"):
+        audit_log.record(credential_name, host, method, audit_log.ALLOWED, "ok",
+                         status=result.get("status"), success=True)
         return f"Status: {result['status']}\n\n{result['body']}"
     else:
+        audit_log.record(credential_name, host, method, audit_log.ALLOWED, result.get("error", "request failed"),
+                         status=result.get("status"), success=False)
         log.warning("Request failed for %s %s: %s", method, url, result.get("error", "unknown"))
         return f"Error: {result.get('error', 'Request failed')}"
 

@@ -82,7 +82,16 @@ Other credential commands:
 agent-keychain list                                    # List credentials and their bound domains
 agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
 agent-keychain migrate                                 # Backfill domains for credentials that have none
+agent-keychain audit                                   # Show recent credential-usage events
 agent-keychain delete my-token                         # Delete a credential
+```
+
+**Audit log.** Every request made through `secure_http_request` is recorded to `~/.agent-keychain/audit.jsonl` (owner-only) — credential name, destination host, method, the allow/block decision, and response status. Secret values, full URLs, and request/response bodies are never written, so the log itself cannot leak a credential. Review it with:
+
+```bash
+agent-keychain audit                       # last 20 events
+agent-keychain audit --blocked-only        # only denied requests (spot probing / misuse)
+agent-keychain audit --credential my-token # filter by credential
 ```
 
 ### 4. Use as MCP Server (with Claude Code)
@@ -155,6 +164,8 @@ agent-keychain/
 │   │   └── process_pool.py      # Subprocess spawner
 │   ├── hooks/                 # Credential guard hook for Claude Code
 │   │   └── credential-guard.sh
+│   ├── audit/                 # Append-only audit log of credential usage
+│   │   └── audit_log.py
 │   ├── logging/               # Structured logging (secrets never logged)
 │   │   └── logger.py
 │   └── cli.py                # Unified CLI entry point
@@ -185,6 +196,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |
 | **Process Isolation** | Short-lived subprocess for HTTP | Long-lived process accumulating secrets |
 | **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |
+| **Audit Log** | Append-only record of every credential use | Undetected misuse / exfiltration attempts |
 
 ### Threat Model & Limitations
 

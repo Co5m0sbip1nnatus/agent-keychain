@@ -63,3 +63,12 @@ def test_domain_binding_blocks_when_no_domains():
         assert "no allowed domains" in result
     finally:
         vault.delete("test-nodomain")
+
+
+def test_blocked_request_is_audited(tmp_path, monkeypatch, github_credential):
+    """A blocked request must leave a 'blocked' entry in the audit log."""
+    from src.audit import audit_log
+    monkeypatch.setenv("AGENT_KEYCHAIN_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
+    secure_http_request("test-domain", "https://evil.com")
+    events = audit_log.read_events(blocked_only=True)
+    assert any(e["host"] == "evil.com" and e["credential"] == "test-domain" for e in events)
