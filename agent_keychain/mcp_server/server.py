@@ -164,7 +164,13 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
     if result.get("success"):
         audit_log.record(credential_name, host, method, audit_log.ALLOWED, "ok",
                          status=result.get("status"), success=True)
-        return f"Status: {result['status']}\n\n{result['body']}"
+        redacted = result.get("redacted") or []
+        header = ""
+        if redacted:
+            kinds = ", ".join(sorted(set(redacted)))
+            log.info("Redacted %s from response of %s %s", kinds, method, host)
+            header = f"[Response DLP: redacted {kinds} from the response]\n\n"
+        return f"{header}Status: {result['status']}\n\n{result['body']}"
     else:
         audit_log.record(credential_name, host, method, audit_log.ALLOWED, result.get("error", "request failed"),
                          status=result.get("status"), success=False)

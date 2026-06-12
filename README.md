@@ -155,12 +155,20 @@ python poc/demo_memory_scrubbing.py     # Memory: lingering vs zeroed
 python poc/demo_token_expiry.py         # Token: permanent vs auto-expired
 python poc/demo_process_isolation.py    # Process: shared vs isolated
 python poc/demo_end_to_end.py           # Full lifecycle: all protections together
+python poc/benchmark_attacks.py         # Adversarial scorecard: naive proxy vs Agent Keychain
 ```
 
 The end-to-end demo walks a single credential through discovery, storage with a
 least-privilege policy, blocked misuse (exfil / out-of-scope / smuggling / rate
 limit), a legitimate request passing every guard, the audit trail, and rotation
 — all locally with fake secrets and no network calls.
+
+The benchmark runs a battery of prompt-injection / exfiltration attacks
+(exfil to an attacker host, domain lookalikes, method/path escalation, secret
+smuggling in body and URL, HTTP downgrade, response-side token leak) and prints
+a quantified before/after scorecard — a naive inject-and-forward proxy leaks
+every one; Agent Keychain blocks them all. The same scenarios are asserted in
+`tests/test_adversarial.py`.
 
 Attack simulation demos (run in Docker):
 
@@ -228,6 +236,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Domain Binding** | Per-credential allowed-domain enforcement | Token exfiltration to attacker-controlled endpoints |
 | **Request Scoping** | Per-credential HTTP method + path allowlist | Over-broad use of a credential (least privilege) |
 | **Smuggling Guard** | Scan of outbound URL/body for credentials | Exfiltrating a second secret via an allowed host |
+| **Response DLP** | Redaction of secrets in API responses | Secrets (e.g. freshly issued tokens) leaking back to the agent |
 | **Credential Guard** | Pattern-based redaction | Secrets leaking into LLM context window |
 | **Hook Enforcement** | Path-blocklist + content scan on reads | Agent reading credential files directly |
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |

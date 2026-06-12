@@ -55,3 +55,21 @@ def scan(content: str) -> list[dict]:
     """
     _, findings = redact(content)
     return findings
+
+
+def scrub_response(body: str, injected_secret: str = "") -> tuple[str, list[str]]:
+    """Make an HTTP response body safe to hand back to the agent.
+
+    Two layers of outbound DLP:
+      1. Replace the exact credential the proxy injected (echo-back defense).
+      2. Redact any *other* credentials the response itself contains — e.g. an
+         API that returns a freshly minted token — so the proxy never leaks a
+         secret back into the agent's context, in either direction.
+
+    Returns (safe_body, redacted_types).
+    """
+    safe = body
+    if injected_secret:
+        safe = safe.replace(injected_secret, "[REDACTED]")
+    safe, findings = redact(safe)
+    return safe, [f["type"] for f in findings]

@@ -29,6 +29,7 @@ sys.path.insert(0, _project_root)
 from agent_keychain.vault.keychain_vault import KeychainVault
 from agent_keychain.vault.domain_policy import host_allowed, extract_host
 from agent_keychain.vault.request_scope import method_allowed, path_allowed, extract_path
+from agent_keychain.guard.credential_guard import scrub_response
 
 
 def _build_auth_header(auth_type: str, secret: str) -> tuple[str, str]:
@@ -155,13 +156,15 @@ def main() -> None:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 resp_body = resp.read().decode("utf-8", errors="replace")
 
-                # Scrub the credential from the response to prevent echo-back leakage
-                safe_body = resp_body.replace(secret, "[REDACTED]")
+                # Outbound DLP: scrub the injected credential (echo-back) AND
+                # redact any other secrets the response itself carries.
+                safe_body, redacted = scrub_response(resp_body, secret)
 
                 result = {
                     "success": True,
                     "status": resp.status,
                     "body": safe_body,
+                    "redacted": redacted,
                 }
 
         except urllib.error.HTTPError as exc:
