@@ -154,7 +154,13 @@ python poc/demo_credential_guard.py     # File read: exposed vs redacted
 python poc/demo_memory_scrubbing.py     # Memory: lingering vs zeroed
 python poc/demo_token_expiry.py         # Token: permanent vs auto-expired
 python poc/demo_process_isolation.py    # Process: shared vs isolated
+python poc/demo_end_to_end.py           # Full lifecycle: all protections together
 ```
+
+The end-to-end demo walks a single credential through discovery, storage with a
+least-privilege policy, blocked misuse (exfil / out-of-scope / smuggling / rate
+limit), a legitimate request passing every guard, the audit trail, and rotation
+— all locally with fake secrets and no network calls.
 
 Attack simulation demos (run in Docker):
 
@@ -176,19 +182,23 @@ docker run --rm -e ANTHROPIC_API_KEY agent-keychain-poc \
 agent-keychain/
 ├── agent_keychain/
 │   ├── vault/                 # OS keychain-backed credential store
-│   │   ├── keychain_vault.py
-│   │   └── secure_string.py  # Memory scrubbing via ctypes
+│   │   ├── keychain_vault.py  # Store/retrieve/rotate + metadata
+│   │   ├── secure_string.py   # Memory scrubbing via ctypes
+│   │   ├── domain_policy.py   # Per-credential allowed-domain matching
+│   │   ├── request_scope.py   # HTTP method + path allowlists
+│   │   └── rotation.py        # Rotation age / overdue policy
 │   ├── mcp_server/            # MCP server for AI agent integration
-│   │   └── server.py
+│   │   └── server.py          # Enforces domain/scope/smuggling/rate-limit
 │   ├── guard/                 # Credential detection and redaction engine
-│   │   └── credential_guard.py
+│   │   ├── credential_guard.py
+│   │   └── env_scanner.py     # Find secrets living outside the vault
 │   ├── proxy/                 # Process-isolated credential handling
 │   │   ├── isolated_request.py  # Short-lived subprocess for HTTP
 │   │   └── process_pool.py      # Subprocess spawner
 │   ├── hooks/                 # Credential guard hook for Claude Code
 │   │   └── credential-guard.sh
 │   ├── audit/                 # Append-only audit log of credential usage
-│   │   └── audit_log.py
+│   │   └── audit_log.py       # record / rate-limit counts / anomaly summary
 │   ├── logging/               # Structured logging (secrets never logged)
 │   │   └── logger.py
 │   └── cli.py                # Unified CLI entry point
@@ -200,7 +210,9 @@ agent-keychain/
 │   ├── demo_memory_scrubbing.py     # Before/after: memory zeroing
 │   ├── demo_token_expiry.py         # Before/after: TTL auto-deletion
 │   ├── demo_process_isolation.py    # Before/after: subprocess isolation
+│   ├── demo_end_to_end.py           # Full lifecycle: all protections together
 │   └── fake_credentials/            # Simulated developer credential files
+├── .github/workflows/         # CI (test.yml) + manual PyPI release (release.yml)
 ├── pyproject.toml             # Package configuration
 ├── Dockerfile                 # Simulated developer environment for PoCs
 └── requirements.txt
