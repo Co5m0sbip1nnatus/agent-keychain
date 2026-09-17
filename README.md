@@ -322,6 +322,18 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Approval Grants** | Human-opened time-limited use windows | Autonomous use of a sensitive credential without sign-off |
 | **OS Sandbox (exec)** | `sandbox-exec` denies credential-file reads (macOS) | An exec'd command pulling other secrets off disk |
 
+### Performance
+
+The per-request subprocess — the mechanism that keeps secrets out of the
+long-lived server's memory — costs about **95 ms median** per brokered call
+on an Apple-silicon Mac (fork + interpreter start + vault load + re-run
+policy checks; measured with `python poc/measure_overhead.py`, no network).
+The in-process policy gauntlet alone is ~1.5 ms. The isolation cost is paid
+once per authenticated call, next to a network round trip of the same order
+of magnitude — the right trade for a desktop workflow. At scale, pooled
+pre-warmed workers would amortize it, at the price of having to prove
+per-request memory hygiene instead of getting it from process exit.
+
 ### Threat Model & Limitations
 
 Agent Keychain protects against credential exposure through the **LLM context window** and **process memory** of AI coding agents. It does **not** protect against:
