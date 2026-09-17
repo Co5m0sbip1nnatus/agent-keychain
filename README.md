@@ -100,6 +100,7 @@ agent-keychain grant my-token --for 5m                 # Open a human-approved w
 agent-keychain revoke my-token                         # Close the approval window now
 agent-keychain allow-domain my-token --allowed-domain api.example.com  # Add a domain to an existing credential
 agent-keychain migrate                                 # Backfill domains for credentials that have none
+agent-keychain doctor                                  # Verify every protection layer is wired up
 agent-keychain audit                                   # Show recent credential-usage events
 agent-keychain scan                                    # Find secrets living outside the vault
 agent-keychain allow-command aws-prod --command aws    # Permit a command for exec

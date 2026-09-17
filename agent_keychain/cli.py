@@ -17,7 +17,9 @@ HOOK_SCRIPT_NAME = "credential-guard.sh"
 HOOK_SOURCE = os.path.join(os.path.dirname(__file__), "hooks", HOOK_SCRIPT_NAME)
 
 HOOK_CONFIG = {
-    "matcher": "Read|Bash",
+    # Write-capable tools must reach the hook too, or its self-protection
+    # layer never sees the edit that disables it.
+    "matcher": "Read|Bash|Edit|Write|MultiEdit|NotebookEdit",
     "hooks": [
         {
             "type": "command",
@@ -96,6 +98,145 @@ def cmd_uninstall(args):
         os.remove(dest)
 
     print("Agent Keychain uninstalled. Restart Claude Code to apply.")
+
+
+def cmd_doctor(args):
+    """Verify that every protection layer is actually wired up.
+
+    A security tool that is installed but silently unwired is worse than
+    none — the user believes they are protected. Each check reports ok /
+    warn / fail; any fail exits non-zero.
+    """
+    import time
+    from agent_keychain.vault.keychain_vault import KeychainVault
+    from agent_keychain.vault import rotation
+    from agent_keychain.audit import audit_log
+    from agent_keychain import sandbox
+
+    OK, WARN, FAIL = "ok", "warn", "fail"
+    results = []
+
+    def check(status, label, detail=""):
+        results.append((status, label, detail))
+
+    # 1. Storage backend reachable
+    backend_kind = os.environ.get("AGENT_KEYCHAIN_BACKEND", "keyring")
+    creds = []
+    try:
+        vault = KeychainVault()
+        creds = vault.list_credentials()
+        check(OK, f"storage backend '{backend_kind}' reachable",
+              f"{len(creds)} credential(s)")
+    except Exception as exc:  # keyring can fail many ways; report, don't crash
+        check(FAIL, f"storage backend '{backend_kind}' unreachable", str(exc))
+
+    # 2. Hook dependencies — without jq the hook exits clean having checked
+    # nothing, which reads as "working" while guarding nothing.
+    hook_dest = os.path.join(HOOK_INSTALL_DIR, HOOK_SCRIPT_NAME)
+    hook_installed = os.path.exists(hook_dest)
+    if shutil.which("bash") and shutil.which("jq"):
+        check(OK, "hook dependencies present (bash, jq)")
+    elif hook_installed:
+        check(FAIL, "hook installed but bash/jq missing",
+              "the guard silently passes everything without them")
+    else:
+        check(WARN, "bash/jq missing", "required if you install the hook")
+
+    # 3. Hook installed, registered, and current
+    if not hook_installed:
+        check(WARN, "credential-guard hook not installed",
+              "file-read channel unprotected — run: agent-keychain install")
+    else:
+        settings = load_settings()
+        reg = None
+        for entry in settings.get("hooks", {}).get("PreToolUse", []):
+            if any(HOOK_SCRIPT_NAME in h.get("command", "")
+                   for h in entry.get("hooks", [])):
+                reg = entry
+                break
+        if reg is None:
+            check(FAIL, "hook file present but not registered in settings",
+                  "run: agent-keychain install")
+        else:
+            matcher = reg.get("matcher", "")
+            if "Edit" not in matcher or "Write" not in matcher:
+                check(WARN, "hook registered with an outdated matcher",
+                      f"'{matcher}' never sees write-capable tools, so "
+                      f"self-protection is off — reinstall: agent-keychain install")
+            else:
+                check(OK, "hook installed and registered", f"matcher: {matcher}")
+        try:
+            with open(hook_dest) as installed, open(HOOK_SOURCE) as packaged:
+                if installed.read() != packaged.read():
+                    check(WARN, "installed hook differs from packaged version",
+                          "run: agent-keychain install")
+                else:
+                    check(OK, "installed hook is current")
+        except OSError:
+            pass
+
+    # 4. MCP registration (project-level, so relative to cwd)
+    candidates = [".mcp.json", os.path.join(".cursor", "mcp.json")]
+    registered = []
+    for path in candidates:
+        try:
+            with open(path) as f:
+                if "agent-keychain" in f.read():
+                    registered.append(path)
+        except OSError:
+            continue
+    if registered:
+        check(OK, "MCP server registered in this project", ", ".join(registered))
+    else:
+        check(WARN, "no MCP registration in this project",
+              "run: agent-keychain register-mcp")
+
+    # 5. Credential policy hygiene
+    if creds:
+        undomained = [c.name for c in creds if not c.allowed_domains]
+        if undomained:
+            check(WARN,
+                  f"{len(undomained)} credential(s) without allowed domains",
+                  "deny-by-default blocks them everywhere — run: agent-keychain migrate")
+        else:
+            check(OK, "every credential is domain-bound")
+        now = time.time()
+        overdue = [c.name for c in creds if rotation.is_rotation_due(c, now)]
+        if overdue:
+            check(WARN, f"rotation overdue: {', '.join(overdue)}",
+                  "run: agent-keychain rotate <name>")
+        else:
+            check(OK, "no credential is overdue for rotation")
+
+    # 6. Audit log writable — unauditable use is the thing we cannot allow
+    audit_file = audit_log.audit_path()
+    try:
+        os.makedirs(os.path.dirname(audit_file), exist_ok=True)
+        fd = os.open(audit_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.close(fd)
+        check(OK, "audit log writable", audit_file)
+    except OSError as exc:
+        check(FAIL, "audit log NOT writable", f"{audit_file}: {exc}")
+
+    # 7. exec sandbox availability (informational)
+    if sandbox.is_available():
+        check(OK, "exec --sandbox available (sandbox-exec)")
+    else:
+        check(WARN, "exec --sandbox unavailable on this platform",
+              "exec still works; the --sandbox flag fails closed")
+
+    icons = {OK: "✓", WARN: "⚠", FAIL: "✗"}
+    print("\nagent-keychain doctor\n")
+    for status, label, detail in results:
+        line = f"  {icons[status]} {label}"
+        if detail:
+            line += f" — {detail}"
+        print(line)
+    fails = sum(1 for s, _, _ in results if s == FAIL)
+    warns = sum(1 for s, _, _ in results if s == WARN)
+    print(f"\n  {len(results)} checks — {fails} failing, {warns} warning(s)\n")
+    if fails:
+        sys.exit(1)
 
 
 def _resolve_store_domains(args):
@@ -513,6 +654,8 @@ def main():
     # install
     sub.add_parser("install", help="Install credential guard hook for Claude Code")
 
+    sub.add_parser("doctor", help="Verify every protection layer is wired up")
+
     # uninstall
     sub.add_parser("uninstall", help="Remove credential guard hook")
 
@@ -627,6 +770,7 @@ def main():
     commands = {
         "install": cmd_install,
         "uninstall": cmd_uninstall,
+        "doctor": cmd_doctor,
         "store": cmd_store,
         "list": cmd_list,
         "rotate": cmd_rotate,
