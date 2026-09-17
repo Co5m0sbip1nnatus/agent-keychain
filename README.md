@@ -221,6 +221,21 @@ a quantified before/after scorecard — a naive inject-and-forward proxy leaks
 every one; Agent Keychain blocks them all. The same scenarios are asserted in
 `tests/test_adversarial.py`.
 
+**Live end-to-end test (opt-in).** Everything above runs offline. To verify
+the zero-exposure property against the real GitHub API — a genuine network
+round trip through the policy gauntlet, the isolated subprocess, and response
+DLP — run:
+
+```bash
+AGENT_KEYCHAIN_E2E_GITHUB_TOKEN=$(gh auth token) pytest tests/test_live_github.py -v
+```
+
+`GET /user` is used as the probe because it rejects unauthenticated requests,
+so a 200 proves the token really was injected — and the test then asserts the
+token appears nowhere the agent can see: not in the tool's return value, not
+in the credential listing, not in the audit log. The module is skipped when
+the variable is unset, so CI never makes network calls.
+
 Attack simulation demos (run in Docker):
 
 ```bash
