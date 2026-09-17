@@ -61,8 +61,11 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
         method: HTTP method (GET, POST, PUT, DELETE, PATCH)
         body: Optional JSON request body for POST/PUT/PATCH requests
     """
-    # Validate URL scheme to prevent SSRF
+    # Validate URL scheme to prevent SSRF / plaintext downgrade. Audited like
+    # every other rejection — a downgrade attempt is a probing signal too.
     if not url.startswith("https://"):
+        audit_log.record(credential_name, extract_host(url), method.upper(),
+                         audit_log.BLOCKED, "non-https url")
         return "Error: Only HTTPS URLs are allowed for security."
     
     # Validate HTTP method
