@@ -26,7 +26,7 @@ Agent                    Agent Keychain                  External API
 
 ## Components
 
-- **Vault** (`agent_keychain/vault/`) — credential store behind a pluggable backend: the OS keychain (macOS Keychain / Linux SecretService / Windows Credential Manager) by default, or a file backend for headless/CI (`backends.py`). Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
+- **Vault** (`agent_keychain/vault/`) — credential store behind a pluggable backend: the OS keychain by default, or a file backend for headless/CI (`backends.py`). CI runs the suite on macOS (real keychain) and Linux (file backend). Windows is untested: the `keyring` library should reach Credential Manager, but the enforcement hook requires `bash` and `jq`. Includes `SecureString` for automatic memory scrubbing after use, and **domain binding** (`domain_policy.py`) so each credential can only be used against its allowed domains.
 - **MCP Server** (`agent_keychain/mcp_server/`) — Exposes credential-proxied tools to AI agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Agents can make authenticated API calls without ever seeing raw secrets.
 - **Credential Guard** (`agent_keychain/guard/`) — Scans file contents and automatically redacts detected credentials (API keys, tokens, private keys, database URLs) before they reach the AI agent's context window.
 - **Process Isolation** (`agent_keychain/proxy/`) — Credential-bearing HTTP requests run in short-lived subprocesses that exit after completion, ensuring credentials never reside in the long-lived MCP server process memory.
