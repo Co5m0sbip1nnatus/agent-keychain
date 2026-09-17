@@ -4,7 +4,12 @@ Exposes credential-proxied tools to AI agents via the Model Context Protocol.
 Agents can make authenticated API calls without ever seeing the raw secrets.
 """
 
-from mcp.server.fastmcp import FastMCP
+# mcp 2.0 renamed FastMCP -> MCPServer (mcp.server.mcpserver); the decorator
+# and run(transport=...) API are unchanged. Support both major lines.
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

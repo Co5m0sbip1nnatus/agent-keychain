@@ -1,4 +1,4 @@
 keyring==25.6.0
-mcp>=1.0.0,<2.0.0   # 2.0.0 renamed mcp.server.fastmcp -> mcp.server.mcpserver
+mcp>=1.0.0,<3.0.0   # 1.x (FastMCP) and 2.x (MCPServer) both supported via shim
 rich==13.9.4
 pytest>=8.0.0
