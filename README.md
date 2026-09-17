@@ -148,7 +148,7 @@ agent-keychain audit --suspicious          # group repeated blocks — a probing
 
 **Rate limiting.** Cap how often a credential can be used with `store --rate-limit <n>` (requests per minute). Once the limit is hit, further requests are blocked (and audited) until the window clears — bounding how fast a compromised agent can use a token.
 
-**Human-in-the-loop approval.** Mark a sensitive credential `store --require-approval` and it's blocked by default — the agent cannot use it on its own. A human opens a short, explicit window with `agent-keychain grant <name> --for 5m`; outside that window every request (HTTP or `exec`) is denied and audited. `agent-keychain revoke <name>` closes it immediately. This is a time-boxed grant rather than a synchronous prompt, so it works even with a headless MCP server.
+**Human-in-the-loop approval.** Mark a sensitive credential `store --require-approval` and it's blocked by default — the agent cannot use it on its own. A human opens a short, explicit window with `agent-keychain grant <name> --for 5m`; outside that window every request (HTTP or `exec`) is denied and audited. `agent-keychain revoke <name>` closes it immediately. This is a time-boxed grant rather than a synchronous prompt, so it works even with a headless MCP server. Approval-gated credentials also **fail closed on auditability**: if the audit log cannot be written, their use (HTTP or `exec`) is refused — a sensitive credential must never be used unaccountably. Ordinary credentials keep best-effort auditing.
 
 ### Headless / CI
 

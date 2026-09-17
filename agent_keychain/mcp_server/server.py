@@ -97,6 +97,17 @@ def secure_http_request(credential_name: str, url: str, method: str = "GET", bod
             f"A human must run: agent-keychain grant {credential_name} --for 5m"
         )
 
+    # Fail closed on auditability: ordinary credentials tolerate a logging
+    # failure (auditing is best-effort), but an approval-gated credential
+    # exists precisely because its use must be accountable — using it
+    # unauditably would be worse than not using it.
+    if entry.require_approval and not audit_log.is_writable():
+        return (
+            f"Error: the audit log is not writable and credential '{credential_name}' "
+            f"requires an audit trail — refusing to proceed (fail-closed). "
+            f"Fix the audit log path and retry."
+        )
+
     # Enforce domain binding: a credential may only be used against the
     # domains it is bound to. This prevents a prompt-injected agent from
     # exfiltrating the token by pointing the request at an arbitrary host.

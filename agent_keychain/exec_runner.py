@@ -21,6 +21,7 @@ import os
 import subprocess
 import time
 
+from agent_keychain.audit import audit_log
 from agent_keychain.vault.command_policy import command_allowed
 from agent_keychain.vault.approval import is_blocked_pending_approval
 from agent_keychain.guard.credential_guard import scrub_response
@@ -50,6 +51,16 @@ def run(vault, credential_name: str, env_names: list[str], command: list[str], s
             "blocked": True,
             "error": (f"credential '{credential_name}' requires human approval and no grant window is open. "
                       f"A human must run: agent-keychain grant {credential_name} --for 5m"),
+        }
+
+    # Same fail-closed rule as the HTTP path: an approval-gated credential
+    # must never be used unauditably.
+    if entry.require_approval and not audit_log.is_writable():
+        return {
+            "ok": False,
+            "blocked": True,
+            "error": (f"the audit log is not writable and credential '{credential_name}' "
+                      f"requires an audit trail — refusing to proceed (fail-closed)."),
         }
 
     program = command[0]

@@ -82,6 +82,24 @@ def record(
     return event
 
 
+def is_writable() -> bool:
+    """Probe whether an event could be appended right now.
+
+    Ordinary auditing is best-effort (a logging failure must not break the
+    request path), but approval-gated credentials invert that: unauditable
+    use of a sensitive secret is exactly what must not happen, so their
+    callers check this first and fail closed.
+    """
+    try:
+        path = audit_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
 def read_events(
     limit: int = 20,
     credential: Optional[str] = None,
