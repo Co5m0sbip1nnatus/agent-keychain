@@ -3,7 +3,7 @@
 # Blocks reads of credential material before it reaches the AI agent and
 # directs the agent to use the MCP `safe_read_file` tool instead.
 #
-# Three layers of defense (best-effort, not a sandbox — see SECURITY.md):
+# Layers of defense (best-effort, not a sandbox — see SECURITY.md):
 #   1. Path blocklist: any command that references a known sensitive
 #      credential path is blocked regardless of which tool/verb is used.
 #      This catches grep, awk, python -c, `< file` redirection, etc.
@@ -12,8 +12,12 @@
 #      removes it from the paths an agent stumbles onto — the keychain is
 #      still reachable by anything running as the same user, so the
 #      retrieval APIs need blocking too.
-#   3. Content scan: for files named on the command line, scan the actual
-#      contents for credential patterns and block if any are found.
+#   2b. Credential emitters: commands whose documented function is printing
+#      a secret (gh auth token, gcloud auth print-access-token, ...).
+#   2c. Env hunting: env/printenv/echo aimed at secret-named variables —
+#      env output is not a file, so the content scan never sees it.
+#   3. Content scan: for files named on the command line (~ expanded), scan
+#      the actual contents for credential patterns and block if any found.
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -43,6 +47,9 @@ PATTERNS=(
     '(postgres|mysql|mongodb)(ql)?://[^:]+:[^@]+@'
     'glpat-[A-Za-z0-9\-]{20}'
     'SG\.[A-Za-z0-9\-_.]{22}\.'
+    # Name-hint: an exported secret whose VALUE has no recognizable format
+    # (export MY_API_KEY=abc123) still marks the file as credential-bearing.
+    'export[[:space:]]+[A-Za-z_]*(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|CREDENTIAL)[A-Za-z_]*='
 )
 
 # Known sensitive credential paths (matched as substrings of the command).
@@ -57,7 +64,9 @@ SENSITIVE_PATH_PATTERNS=(
     '\.docker/config\.json'
     '\.kube/config'
     '\.config/gh/hosts\.yml'
-    '(^|[^A-Za-z0-9._/])\.env([^A-Za-z0-9]|$)'   # .env / project .env
+    '(^|[^A-Za-z0-9._])\.env([^A-Za-z0-9]|$)'    # .env anywhere: ~/.env, dir/.env
+                                                 # (leading class must NOT exclude
+                                                 #  '/', or path/.env slips through)
     '\.agent-keychain/store\.json'               # our own file-backend vault
 )
 
@@ -69,6 +78,25 @@ VAULT_ACCESS_PATTERNS=(
     'security[[:space:]]+(find-generic-password|find-internet-password|dump-keychain)'
     'get_password[[:space:]]*\('     # keyring.get_password(...)
     '\.retrieve[[:space:]]*\('       # KeychainVault.retrieve(...)
+)
+
+# Commands whose documented FUNCTION is printing a credential to stdout.
+# A benign agent runs these while "checking your setup" -- and the secret
+# lands straight in its context. Route through `agent-keychain exec` instead.
+EMITTER_PATTERNS=(
+    'gh[[:space:]]+auth[[:space:]]+token'
+    'aws[[:space:]]+configure[[:space:]]+export-credentials'
+    'gcloud[[:space:]]+auth[[:space:]]+(application-default[[:space:]]+)?print-(access|identity)-token'
+    'kubectl[[:space:]]+config[[:space:]]+view[[:space:]].*--raw'
+)
+
+# Environment-variable hunting: env output is not a file, so the content
+# scan never sees it. Targeted patterns only -- a bare `env` for ordinary
+# debugging stays allowed (documented residual; see SECURITY.md).
+ENV_HUNT_PATTERNS=(
+    '(env|printenv|set)[[:space:]]*\|[^|]*(-i[[:space:]])?[^|]*([Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Aa][Pp][Ii]_?[Kk][Ee][Yy])'
+    'printenv[[:space:]]+[A-Za-z_]*(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|CREDENTIAL)'
+    '(echo|printf)[[:space:]][^|;&]*\$\{?[A-Za-z_]*(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|CREDENTIAL)'
 )
 
 # The file backend's location is configurable; block wherever it actually is.
@@ -83,6 +111,11 @@ block() {
 
 block_vault() {
     echo "Credential Guard: $1 Secrets are never handed out — use the MCP tool 'secure_http_request' to make an authenticated call, or 'agent-keychain exec' for a non-HTTP tool. Neither returns the secret itself." >&2
+    exit 2
+}
+
+block_emitter() {
+    echo "Credential Guard: $1 Its output would put a secret into the agent context. If the authenticated action itself is needed, run it via 'agent-keychain exec' (output is DLP-scrubbed), or ask the human to run it." >&2
     exit 2
 }
 
@@ -109,8 +142,12 @@ fi
 
 # Layer 1: path blocklist — reference to a known sensitive path is blocked
 # regardless of the command verb (grep, awk, python -c, redirection, ...).
+# Known-clean .env variants (.env.example etc.) are exempted first, so the
+# real thing (.env, .env.local, .env.production) still blocks even when an
+# exempt name appears in the same command.
+CHKCMD=$(echo "$COMMAND" | sed -E 's/\.env\.(example|sample|template|dist)[A-Za-z0-9._-]*//g')
 for pattern in "${SENSITIVE_PATH_PATTERNS[@]}"; do
-    if echo "$COMMAND" | grep -qE "$pattern"; then
+    if echo "$CHKCMD" | grep -qE "$pattern"; then
         block "command references a known credential path."
     fi
 done
@@ -124,6 +161,21 @@ for pattern in "${VAULT_ACCESS_PATTERNS[@]}"; do
     fi
 done
 
+# Layer 2b: credential-emitting commands — printing a secret is their function.
+for pattern in "${EMITTER_PATTERNS[@]}"; do
+    if echo "$COMMAND" | grep -qE "$pattern"; then
+        block_emitter "this command prints a credential to stdout."
+    fi
+done
+
+# Layer 2c: environment-variable hunting — env output never passes the
+# content scan (it is not a file), so the hunt itself is what gets blocked.
+for pattern in "${ENV_HUNT_PATTERNS[@]}"; do
+    if echo "$COMMAND" | grep -qE "$pattern"; then
+        block_emitter "command extracts secrets from environment variables."
+    fi
+done
+
 # Verbs that surface file *contents* (and thus could leak secrets to the agent).
 # Content scanning only applies to these — so `rm`/`mv`/`chmod` on a file that
 # happens to contain a secret are not blocked (they never reveal the contents).
@@ -132,7 +184,13 @@ READ_VERBS='cat|head|tail|less|more|bat|grep|egrep|fgrep|rg|ag|awk|sed|nl|tac|od
 # Layer 3: content scan — split the command into segments on pipes/chains,
 # strip flags, and scan tokens that resolve to existing files. Only segments
 # whose verb reads contents (or that use `<` input redirection) are scanned.
-SEGMENTS=$(echo "$COMMAND" | tr '|;' '\n' | sed 's/&&/\n/g; s/||/\n/g')
+#
+# Segmentation runs on a copy with quoted spans blanked out: a `|` inside a
+# quoted grep pattern is not a pipe, and splitting on it used to push the
+# file argument into a segment whose "verb" was pattern text — skipping the
+# scan entirely. Quoted tokens are scanned separately below.
+SEGSRC=$(echo "$COMMAND" | sed "s/'[^']*'//g" | sed 's/"[^"]*"//g')
+SEGMENTS=$(echo "$SEGSRC" | tr '|;' '\n' | sed 's/&&/\n/g; s/||/\n/g')
 
 while IFS= read -r segment; do
     [ -z "$segment" ] && continue
@@ -150,8 +208,28 @@ while IFS= read -r segment; do
         # Strip surrounding quotes and a leading redirection operator.
         clean=$(echo "$token" | sed "s/^[<>]*//; s/[\"']//g")
         [ -z "$clean" ] && continue
+        # Expand a leading ~ — [ -f "~/.gitconfig" ] never matches the real
+        # file, so unexpanded tildes used to bypass the content scan entirely.
+        case "$clean" in
+            "~") clean="$HOME" ;;
+            "~/"*) clean="$HOME/${clean#\~/}" ;;
+        esac
         scan_file_contents "$clean"
     done
 done <<< "$SEGMENTS"
+
+# Quoted tokens were blanked out of the segmentation above; if the command
+# involves a content-reading verb anywhere, scan them as candidate files
+# (e.g. cat 'my secrets.txt').
+if echo "$SEGSRC" | grep -qE "(^|[[:space:]|;&(])($READ_VERBS)([[:space:]]|$)" || echo "$SEGSRC" | grep -q '<'; then
+    while IFS= read -r qtoken; do
+        [ -z "$qtoken" ] && continue
+        case "$qtoken" in
+            "~") qtoken="$HOME" ;;
+            "~/"*) qtoken="$HOME/${qtoken#\~/}" ;;
+        esac
+        scan_file_contents "$qtoken"
+    done <<< "$(echo "$COMMAND" | grep -oE "'[^']*'|\"[^\"]*\"" | sed "s/^[\"']//; s/[\"']$//")"
+fi
 
 exit 0

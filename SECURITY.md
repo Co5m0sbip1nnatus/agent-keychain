@@ -53,6 +53,17 @@ the weakest of them.
   query commands, `keyring` / vault retrieval calls, the file backend's store),
   but it matches on command text and can be evaded by an agent that is
   deliberately trying to. Treat this as friction, not containment.
+- **Hook coverage is enumerated, not complete.** The hook now also blocks
+  credential-emitting commands (`gh auth token`, `aws configure
+  export-credentials`, `gcloud auth print-access-token`, `kubectl config view
+  --raw`) and targeted environment-variable hunting (`env | grep -i token`,
+  `echo $GITHUB_TOKEN`). Known residuals, accepted deliberately: a bare `env`
+  dump stays allowed (blocking it breaks ordinary debugging — run
+  `agent-keychain scan` / `import --scrub` and restart the agent session so
+  there is nothing in the environment to dump), secrets in formats none of the
+  patterns recognize pass the content scan, and output of arbitrary commands
+  that happen to print a secret (`docker inspect`, `ps`, shell history) is not
+  scanned — output-side DLP exists only on the proxy and `exec` paths.
 
 - **`exec` is not a sandbox.** The `exec` wrapper injects a secret into a
   subprocess the agent chose. A credential's command allowlist bounds *which*
@@ -68,5 +79,5 @@ the weakest of them.
 
 | Version | Supported |
 |---------|-----------|
-| 1.14.x  | Yes       |
-| < 1.14  | No        |
+| 1.15.x  | Yes       |
+| < 1.15  | No        |

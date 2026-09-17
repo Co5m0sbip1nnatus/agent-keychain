@@ -295,6 +295,7 @@ Agent Keychain implements defense-in-depth against credential exposure in AI age
 | **Credential Guard** | Pattern-based redaction | Secrets leaking into LLM context window |
 | **Hook Enforcement** | Path-blocklist + content scan on reads | Agent reading credential files directly |
 | **Vault Access Guard** | Hook blocks keychain/vault read-out commands | Agent bypassing the proxy to read a secret from the vault |
+| **Emitter Guard** | Hook blocks credential-printing commands (`gh auth token`, ...) and env-var hunting | A benign agent putting a secret into its own context while "checking the setup" |
 | **Memory Scrubbing** | ctypes-based zeroing after use | Credentials lingering in process memory |
 | **Process Isolation** | Short-lived subprocess for HTTP | Long-lived process accumulating secrets |
 | **Token Expiry** | TTL-based auto-deletion | Stolen credentials remaining valid indefinitely |

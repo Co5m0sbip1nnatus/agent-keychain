@@ -7,6 +7,7 @@ as broken as one that blocks nothing.
 """
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -23,17 +24,19 @@ pytestmark = pytest.mark.skipif(
 BLOCK_EXIT = 2
 
 
-def run_hook(tool_name: str, **tool_input) -> int:
+def run_hook(tool_name: str, home: str | None = None, **tool_input) -> int:
     """Run the hook with a tool payload; return its exit code."""
     payload = json.dumps({"tool_name": tool_name, "tool_input": tool_input})
+    env = dict(os.environ, HOME=home) if home else None
     proc = subprocess.run(
-        ["bash", str(HOOK)], input=payload, capture_output=True, text=True, timeout=20
+        ["bash", str(HOOK)], input=payload, capture_output=True, text=True,
+        timeout=20, env=env,
     )
     return proc.returncode
 
 
-def bash(command: str) -> int:
-    return run_hook("Bash", command=command)
+def bash(command: str, home: str | None = None) -> int:
+    return run_hook("Bash", home=home, command=command)
 
 
 # --- Layer 2: vault access -------------------------------------------------
@@ -113,3 +116,114 @@ def test_reading_a_clean_file_is_allowed(tmp_path):
 
 def test_unrelated_tools_pass_through():
     assert run_hook("Glob", pattern="**/*.py") == 0
+
+
+# --- The PoC recon list -----------------------------------------------------
+# poc/agent_credential_exposure.py proved these exact commands leak
+# credentials from an ordinary agent session. The hook must block the ones
+# whose target is sensitive by PATH (deterministic on any machine); the two
+# content-dependent ones (~/.gitconfig, ~/.bashrc) are covered by the
+# fake-HOME tests below, because blocking them unconditionally would break
+# ordinary work on machines where those files hold no secrets.
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat ~/.env",                                              # PoC #1
+        "cat ~/.aws/credentials",                                  # PoC #2
+        "cat ~/.npmrc",                                            # PoC #4
+        "env | grep -i 'token\\|key\\|secret\\|password'",         # PoC #5
+        "cat ~/.docker/config.json",                               # PoC #6
+        "cat ~/.kube/config",                                      # PoC #7
+        "ls -la ~/.ssh/ && head -5 ~/.ssh/id_rsa",                 # PoC #8
+        "find ~/projects -name '.env' -exec cat {} \\;",           # PoC #9
+    ],
+)
+def test_poc_recon_commands_are_blocked(command):
+    assert bash(command) == BLOCK_EXIT
+
+
+# --- Credential-emitting commands -------------------------------------------
+# Printing a secret is these commands' documented function; a benign agent
+# runs them while "checking your setup" and the secret lands in context.
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh auth token",
+        "aws configure export-credentials",
+        "gcloud auth print-access-token",
+        "kubectl config view --raw",
+        "echo $GITHUB_TOKEN",
+        "printenv GITHUB_TOKEN",
+    ],
+)
+def test_credential_emitting_commands_are_blocked(command):
+    assert bash(command) == BLOCK_EXIT
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh auth status",          # masks the token itself
+        "gh pr list",
+        "kubectl config view",     # redacts secrets without --raw
+        "gcloud auth list",
+        "env",                     # bare env for debugging stays allowed
+        "env | sort",
+        "echo $PATH",
+    ],
+)
+def test_nearby_legitimate_commands_stay_allowed(command):
+    assert bash(command) == 0
+
+
+# --- Content scan under PoC-machine conditions ------------------------------
+# With HOME pointed at a directory whose dotfiles hold secrets, the
+# content-dependent PoC commands must block; a clean file must not.
+
+@pytest.fixture
+def secret_home(tmp_path):
+    (tmp_path / ".gitconfig").write_text(
+        "[url]\n  insteadOf = https://user:ghp_" + "A" * 36 + "@github.com\n"
+    )
+    (tmp_path / ".bashrc").write_text("export MY_API_KEY=plainvalue123\n")
+    (tmp_path / ".zshrc").write_text("alias ll='ls -la'\n")
+    return str(tmp_path)
+
+
+def test_gitconfig_with_secret_is_blocked(secret_home):
+    assert bash("cat ~/.gitconfig", home=secret_home) == BLOCK_EXIT  # PoC #3
+
+
+def test_bashrc_export_hunt_is_blocked(secret_home):
+    # PoC #10 — regression for two bugs at once: the quoted pipe used to
+    # break segmentation, and the exported plain value matches only the
+    # name-hint pattern.
+    cmd = "grep -i 'export.*token\\|export.*key\\|export.*secret' ~/.bashrc"
+    assert bash(cmd, home=secret_home) == BLOCK_EXIT
+
+
+def test_clean_dotfile_is_allowed(secret_home):
+    assert bash("cat ~/.zshrc", home=secret_home) == 0
+
+
+def test_quoted_filename_is_scanned(tmp_path):
+    secret = tmp_path / "my secrets.txt"
+    secret.write_text("token = ghp_" + "B" * 36 + "\n")
+    assert bash(f"cat '{secret}'") == BLOCK_EXIT
+
+
+# --- .env variants -----------------------------------------------------------
+
+def test_env_example_is_allowed():
+    assert bash("ls .env.example") == 0
+    assert bash("cat .env.example") == 0
+
+
+def test_real_env_variants_still_block():
+    assert bash("cat .env") == BLOCK_EXIT
+    assert bash("cat .env.local") == BLOCK_EXIT
+    assert bash("cat backend/.env") == BLOCK_EXIT
+    # An exempt name in the same command must not shadow the real one.
+    assert bash("cat .env .env.example") == BLOCK_EXIT
