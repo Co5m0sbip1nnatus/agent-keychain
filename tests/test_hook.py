@@ -24,10 +24,23 @@ pytestmark = pytest.mark.skipif(
 BLOCK_EXIT = 2
 
 
-def run_hook(tool_name: str, home: str | None = None, **tool_input) -> int:
+def run_hook(
+    tool_name: str,
+    home: str | None = None,
+    hook_env: dict | None = None,
+    **tool_input,
+) -> int:
     """Run the hook with a tool payload; return its exit code."""
     payload = json.dumps({"tool_name": tool_name, "tool_input": tool_input})
-    env = dict(os.environ, HOME=home) if home else None
+    env = dict(os.environ)
+    # Deterministic self-protection state no matter where pytest runs (a dev
+    # session inside the repo would otherwise lift it via CLAUDE_PROJECT_DIR).
+    env.pop("CLAUDE_PROJECT_DIR", None)
+    env.pop("AGENT_KEYCHAIN_UNGUARD", None)
+    if home:
+        env["HOME"] = home
+    if hook_env:
+        env.update(hook_env)
     proc = subprocess.run(
         ["bash", str(HOOK)], input=payload, capture_output=True, text=True,
         timeout=20, env=env,
@@ -35,8 +48,8 @@ def run_hook(tool_name: str, home: str | None = None, **tool_input) -> int:
     return proc.returncode
 
 
-def bash(command: str, home: str | None = None) -> int:
-    return run_hook("Bash", home=home, command=command)
+def bash(command: str, home: str | None = None, hook_env: dict | None = None) -> int:
+    return run_hook("Bash", home=home, hook_env=hook_env, command=command)
 
 
 # --- Layer 2: vault access -------------------------------------------------
@@ -227,3 +240,54 @@ def test_real_env_variants_still_block():
     assert bash("cat backend/.env") == BLOCK_EXIT
     # An exempt name in the same command must not shadow the real one.
     assert bash("cat .env .env.example") == BLOCK_EXIT
+
+
+# --- Self-protection ---------------------------------------------------------
+# The guard must guard itself: a benign agent that hits a block will try to
+# "fix" the obstacle by editing the hook, deregistering it, or uninstalling.
+
+def test_edit_to_hook_script_is_blocked():
+    assert run_hook("Edit", file_path="/home/u/.claude/hooks/credential-guard.sh") == BLOCK_EXIT
+
+
+def test_write_to_settings_is_blocked():
+    assert run_hook("Write", file_path="/home/u/.claude/settings.json") == BLOCK_EXIT
+    assert run_hook("Write", file_path="/home/u/.claude/settings.local.json") == BLOCK_EXIT
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "agent-keychain uninstall",
+        "rm ~/.claude/hooks/credential-guard.sh",
+        "sed -i '' 's/exit 2/exit 0/' ~/.claude/hooks/credential-guard.sh",
+        "echo '{}' > ~/.claude/settings.json",
+        "python3 -c \"open('/home/u/.claude/settings.json','w').write('{}')\"",
+    ],
+)
+def test_tampering_with_the_guard_is_blocked(command):
+    assert bash(command) == BLOCK_EXIT
+
+
+def test_reading_the_hook_stays_allowed():
+    # The hook holds no secrets; inspecting it is legitimate.
+    assert bash("cat ~/.claude/hooks/credential-guard.sh") == 0
+
+
+def test_dev_repo_session_is_exempt():
+    """Developing agent-keychain itself must not be blocked by its own guard."""
+    repo_root = str(HOOK.parent.parent.parent)
+    assert bash(
+        "sed -i '' 's/x/y/' agent_keychain/hooks/credential-guard.sh",
+        hook_env={"CLAUDE_PROJECT_DIR": repo_root},
+    ) == 0
+
+
+def test_operator_unguard_env_lifts_protection():
+    assert bash("agent-keychain uninstall", hook_env={"AGENT_KEYCHAIN_UNGUARD": "1"}) == 0
+
+
+def test_unguard_cannot_be_injected_from_the_command_line():
+    """Prefixing the variable onto the command reaches the child process, not
+    the hook -- the escape hatch is operator-only by construction."""
+    assert bash("AGENT_KEYCHAIN_UNGUARD=1 agent-keychain uninstall") == BLOCK_EXIT

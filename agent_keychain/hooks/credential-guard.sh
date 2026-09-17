@@ -22,6 +22,32 @@
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
+# --- Self-protection ---------------------------------------------------------
+# The guard must guard itself: a benign agent that hits a block will
+# helpfully try to "fix" the obstacle by editing the hook, deregistering it
+# from settings, or running `agent-keychain uninstall`. All of that is a
+# human decision, so it is blocked here.
+#
+# Lifted in exactly two cases (checked against the HOOK's own environment,
+# which an agent cannot set from a command line):
+#   - AGENT_KEYCHAIN_UNGUARD is set by the operator, or
+#   - the session is developing agent-keychain itself (the hook source
+#     lives in the project) — otherwise the tool could not work on its
+#     own guard.
+SELF_PROTECT=1
+[ -n "$AGENT_KEYCHAIN_UNGUARD" ] && SELF_PROTECT=0
+[ -f "$CLAUDE_PROJECT_DIR/agent_keychain/hooks/credential-guard.sh" ] && SELF_PROTECT=0
+
+PROTECTED_PATHS='credential-guard\.sh|\.claude/settings(\.local)?\.json'
+# Verbs/redirects that can modify a file. Pure reads of the hook stay
+# allowed — it contains no secrets.
+WRITEISH='(^|[;&|[:space:]])(rm|mv|cp|chmod|chattr|truncate|tee|sed|perl|ruby|python[0-9.]*)([[:space:]]|$)|>>?'
+
+block_self() {
+    echo "Credential Guard: $1 The guard and its registration are protected; changing or removing them is a decision for the human operator." >&2
+    exit 2
+}
+
 # --- Read tool: scan the exact file being read -------------------------------
 if [ "$TOOL_NAME" = "Read" ]; then
     FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
@@ -29,6 +55,13 @@ if [ "$TOOL_NAME" = "Read" ]; then
 elif [ "$TOOL_NAME" = "Bash" ]; then
     COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
     FILE_PATH=""
+elif [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "MultiEdit" ] || [ "$TOOL_NAME" = "NotebookEdit" ]; then
+    # Write-capable tools are only inspected for self-protection.
+    TARGET=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
+    if [ "$SELF_PROTECT" = 1 ] && echo "$TARGET" | grep -qE "$PROTECTED_PATHS"; then
+        block_self "this edit would modify the credential guard or its registration."
+    fi
+    exit 0
 else
     exit 0
 fi
@@ -47,8 +80,10 @@ PATTERNS=(
     '(postgres|mysql|mongodb)(ql)?://[^:]+:[^@]+@'
     'glpat-[A-Za-z0-9\-]{20}'
     'SG\.[A-Za-z0-9\-_.]{22}\.'
-    # Name-hint: an exported secret whose VALUE has no recognizable format
-    # (export MY_API_KEY=abc123) still marks the file as credential-bearing.
+    # Name-hint: an exported variable with a secret-ish NAME marks the file
+    # as credential-bearing even when the value has no recognizable format.
+    # (Careful wording here: a literal example would match the pattern below
+    # and make the hook flag its own source.)
     'export[[:space:]]+[A-Za-z_]*(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|CREDENTIAL)[A-Za-z_]*='
 )
 
@@ -139,6 +174,17 @@ fi
 
 # --- Bash tool path ----------------------------------------------------------
 [ -z "$COMMAND" ] && exit 0
+
+# Self-protection first: tampering with the guard, its registration, or
+# running uninstall is a human decision. Reads of the hook stay allowed.
+if [ "$SELF_PROTECT" = 1 ]; then
+    if echo "$COMMAND" | grep -qE 'agent-keychain[[:space:]]+uninstall'; then
+        block_self "uninstalling the credential guard from a command is not allowed."
+    fi
+    if echo "$COMMAND" | grep -qE "$PROTECTED_PATHS" && echo "$COMMAND" | grep -qE "$WRITEISH"; then
+        block_self "command could modify the credential guard or its registration."
+    fi
+fi
 
 # Layer 1: path blocklist — reference to a known sensitive path is blocked
 # regardless of the command verb (grep, awk, python -c, redirection, ...).

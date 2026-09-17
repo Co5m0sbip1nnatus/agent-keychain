@@ -53,6 +53,16 @@ the weakest of them.
   query commands, `keyring` / vault retrieval calls, the file backend's store),
   but it matches on command text and can be evaded by an agent that is
   deliberately trying to. Treat this as friction, not containment.
+- **The guard guards itself, best-effort.** A benign agent that hits a block
+  will often try to "fix" the obstacle — by editing the hook script, removing
+  its registration from `.claude/settings.json`, or running `agent-keychain
+  uninstall`. The hook blocks all three (edits via Write/Edit tools and via
+  shell write verbs; reads of the hook stay allowed). Two deliberate escape
+  hatches, both read from the hook's own environment so they cannot be
+  injected from a command line: `AGENT_KEYCHAIN_UNGUARD=1` set by the
+  operator, and sessions developing agent-keychain itself. Like the rest of
+  the hook this is string matching — friction against accidents, not
+  containment against intent.
 - **Hook coverage is enumerated, not complete.** The hook now also blocks
   credential-emitting commands (`gh auth token`, `aws configure
   export-credentials`, `gcloud auth print-access-token`, `kubectl config view
